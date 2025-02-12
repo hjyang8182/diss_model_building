@@ -1,0 +1,22 @@
+#!/bin/bash
+#SBATCH -A MASCOLO-SL3-GPU
+#SBATCH --nodes=1              #! node count
+#SBATCH --ntasks=4             #! total number of tasks across all node
+#SBATCH --time=12:00:00
+#SBATCH --mail-type=begin        #! send email when job begins
+#SBATCH --mail-type=end          #! send email when job ends
+#SBATCH --mail-type=fail         #! send email if job fails
+#SBATCH --mail-user=hy381@cam.ac.uk
+#SBATCH --gres=gpu:4
+#SBATCH -p ampere
+
+module purge
+module load gcc/8
+module load rhel8/default-gpu
+module unload cuda/8.0
+module load python/3.11.0-icl cuda/12.1  
+
+source ~/.bashrc
+conda activate model_train 
+python ./spo2_models.py
+conda deactivate
