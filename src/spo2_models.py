@@ -11,6 +11,23 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import GRU, Dropout, Flatten, Conv1D, MaxPool1D, InputLayer, Reshape, LSTM, Bidirectional, Dense
 from tensorflow.keras.regularizers import l2
 
+
+def el_moaqet_lstm_model(): 
+    model = Sequential()
+    model.add(InputLayer(input_shape = (20,)))
+    model.add(Reshape((20, 1)))
+
+    model.add(LSTM(100, return_sequences=True))
+    model.add(LSTM(40))
+
+    model.add(Dense(64, activation = 'relu'))
+    model.add(Dense(3, activation='softmax'))
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0005, clipnorm = 1.0)
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    model.summary()
+    return model
+
 def dense_model(): 
     model = Sequential()
     model.add(InputLayer(input_shape = (20,)))
@@ -27,16 +44,18 @@ def dense_model():
     model.summary()
     return model
 
-def gru_raw_model(): 
+def gru_model(): 
     model = Sequential()
-    model.add(InputLayer(input_shape = (40, )))
-    model.add(Reshape((40, 1)))
+    model.add(InputLayer(input_shape = (20, )))
+    model.add(Reshape((20, 1)))
 
-    model.add(GRU(512, return_sequences=True))
-    model.add(GRU(256, return_sequences=True))
-    model.add(GRU(128))
+    model.add(GRU(16, return_sequences=True))
+    model.add(GRU(16, return_sequences=True))
+    model.add(GRU(16, return_sequences=True))
+    model.add(GRU(16, return_sequences=True))
+    model.add(GRU(16))
 
-    model.add(Dense(64, activation='relu'))
+    model.add(Dense(256, activation='relu'))
     model.add(Dense(3, activation='softmax'))
 
     optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0005, clipnorm = 1.0)
@@ -44,7 +63,7 @@ def gru_raw_model():
     model.summary()
     return model
 
-def delta_gru_model(): 
+def bi_gru_model(): 
     model = Sequential()
     model.add(InputLayer(input_shape = (20, )))
     model.add(Reshape((20, 1)))
@@ -66,22 +85,20 @@ def delta_gru_model():
     model.summary()
     return model
 
-def lstm_delta_model_dense(): 
+def lstm_model(): 
+    # tuned lstm units complete
     model = Sequential()
     model.add(InputLayer(input_shape = (20,)))
     model.add(Reshape((20, 1)))
 
-    model.add(LSTM(32))
+    model.add(LSTM(128, return_sequences= True))
+    model.add(LSTM(64, return_sequences= True))
+    model.add(LSTM(16))
 
-    model.add(Dense(512, activation='relu'))
-    model.add(Dense(256, activation='relu'))
     model.add(Dense(128, activation='relu'))
-    model.add(Dense(64, activation='relu'))
-    model.add(Dense(32, activation='relu'))
-    model.add(Dense(16, activation='relu'))
     model.add(Dense(3, activation='softmax'))
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0005)
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003)
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     model.summary()
     return model
@@ -128,26 +145,6 @@ def bilstm_model():
 
     return model
 
-def lstm_norm_model(): 
-    model = Sequential()
-    model.add(InputLayer(input_shape = (40,)))
-    model.add(Reshape((40, 1)))
-
-    # model.add(LSTM(4096, return_sequences = True))
-    # model.add(LSTM(2048, return_sequences = True))
-    # model.add(LSTM(1024, return_sequences = True))
-    model.add(LSTM(512, return_sequences = True))
-    model.add(LSTM(256, return_sequences = True))
-    model.add(LSTM(128))
-
-    model.add(Dense(64, activation='relu'))
-    model.add(Dense(3, activation='softmax'))
-
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0005, clipnorm = 1.0)
-    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
-    model.summary()
-    return model
-
 def cnn_model(): 
     cnn_model = Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
@@ -169,35 +166,27 @@ def cnn_model():
 
 
 def cnn_1d_model(): 
-    cnn_model = Sequential()
+    # Tuned kernel complete
+    model = Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    cnn_model.add(InputLayer(input_shape = (20,), dtype = 'float32'))
-    cnn_model.add(Reshape((-1, 1)))
+    model.add(InputLayer(input_shape = (20,), dtype = 'float32'))
+    model.add(Reshape((-1, 1)))
 
-    num_layers = 1 
-    filter_num = 16
-    filter_size = 3
-    base_dense_units = 64
-    num_dense_layers = 3
-    for i in range(num_layers-1, -1, -1):
-        cnn_model.add(Conv1D(filter_num * (2 ** i), filter_size, activation = 'relu', kernel_initializer = 'he_normal'))
-        cnn_model.add(MaxPool1D(2))
+    model.add(Conv1D(32, 4, activation = 'relu', kernel_initializer = 'he_normal'))
+    model.add(MaxPool1D(2))
 
-    cnn_model.add(Flatten())
-    for i in range(num_dense_layers, 0, -1):
-        cnn_model.add(Dense(base_dense_units  * (2 ** (i-1)), activation='relu'))
-    cnn_model.add(Dense(3, activation = 'softmax'))
+    model.add(Flatten())
+    model.add(Dense(256, activation = 'relu'))
+    model.add(Dense(3, activation = 'softmax'))
+
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0)
-    cnn_model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall']) 
-    return cnn_model
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall']) 
+    return model
 
-train.load_and_train(cnn_1d_model, 'spo2_cnn_model_full_data', train.spo2_delta_data, initial_epoch = 2)
-train.train_model_full_data(cnn_1d_model, 'spo2_cnn_model_full_data', train.spo2_delta_data)
-train.load_and_train(delta_gru_model, 'bi_gru_delta_full_data', train.spo2_delta_data, initial_epoch = 1)
 
-train.train_model_full_data(delta_gru_model, 'bi_gru_delta_full_data', train.spo2_delta_data)
-# train.train_model(lstm_delta_model_dense, 'lstm_delta_more_dense_data_subset', train.delta_model_data)
-# train.load_and_train(lstm_delta_model_dense, 'lstm_delta_more_dense_layers_model', train.spo2_delta_data, initial_epoch = 8)
-# train.train_model(cnn_1d_model, 'cnn_delta_model', train.delta_model_data)
-# train.train_model(lstm_delta_model_dense, 'lstm_delta_more_dense_with_dropout', train.delta_model_data)
+train.train_model_full_data(cnn_1d_model, 'spo2_cnn_model_full_data', train.spo2_data_full)
+train.train_model_full_data(gru_model, 'spo2_gru_model_full_data', train.spo2_data_full)
+train.train_model_full_data(lstm_model, 'spo2_lstm_model_full_data', train.spo2_data_full)
+train.train_model_full_data(el_moaqet_lstm_model, 'spo2_el_moaqet_lstm_full_data', train.spo2_data_full)
+

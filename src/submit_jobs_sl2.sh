@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -A MASCOLO-SL3-GPU
+#SBATCH -A MASCOLO-SL2-GPU
 #SBATCH --output=%x_%j.out  # Saves output as job_name_jobID.out
 #SBATCH --nodes=1              #! node count
 #SBATCH --ntasks=4             #! total number of tasks across all node
