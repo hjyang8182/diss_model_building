@@ -6,7 +6,7 @@ import pandas as pd
 import sys
 script_dir = os.getcwd()
 sys.path.append(script_dir)
-import utils as utils
+import data as data
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import GRU, Dropout, Flatten, Conv1D, MaxPool1D, InputLayer, Reshape, LSTM, Bidirectional, Dense
 from tensorflow.keras.regularizers import l2

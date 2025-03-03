@@ -4,22 +4,19 @@ import os
 import pandas as pd
 import sys
 import keras_tuner as kt
-from train import spo2_data_subset, audio_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH
 from tensorflow.keras.models import Sequential
 import matplotlib.pyplot as plt
 from tensorflow.keras.layers import MaxPool1D, InputLayer, Reshape, LSTM, Bidirectional, Dense, Conv1D, Flatten, GRU
 
 script_dir = os.getcwd()
 sys.path.append(script_dir)
-import utils
+import data
 
 
-def tune(model_fn, project_name, feature): 
-    if feature == 'audio': 
-        train_data, valid_data, test_data = audio_data
-    else: 
-        train_data, valid_data, test_data = spo2_data_subset
-    tuner = kt.Hyperband(model_fn, objective = 'val_accuracy', max_epochs = 50, factor = 3, directory = '/home/hy381/rds/hpc-work/model_tuning', project_name = project_name, overwrite = True)
+
+def tune(model_fn, data, project_name, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH): 
+    train_data, valid_data, test_data = data
+    tuner = kt.Hyperband(model_fn, objective = 'val_accuracy', max_epochs = 50, factor = 2, directory = '/home/hy381/rds/hpc-work/model_tuning', project_name = project_name)
     tuner.search(train_data, epochs = 50, validation_data = valid_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, validation_steps = VALID_STEPS_PER_EPOCH)
 
 def visualize_hp(model_fn, project_name): 

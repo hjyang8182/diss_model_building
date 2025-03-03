@@ -1,47 +1,52 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Bidirectional, LSTM, InputLayer, MelSpectrogram, Dropout, Reshape, Conv2D, MaxPool2D, Flatten, Dense, BatchNormalization, Normalization
+from tensorflow.keras.layers import GlobalAveragePooling2D, ReLU, Conv1D, MaxPool1D, InputLayer, MelSpectrogram, Dropout, LSTM, Reshape, Conv2D, MaxPool2D, Flatten, Dense, BatchNormalization, AveragePooling2D, Bidirectional
+from tensorflow.keras.regularizers import l1, l2
+from tensorflow.keras.models import Sequential
 import numpy as np
 import os
 import pandas as pd
 import sys
 import keras_tuner as kt
 import matplotlib.pyplot as plt
+from data import DataLoader
 from tune_models import tune, visualize_hp
 
 script_dir = os.getcwd()
 sys.path.append(script_dir)
-import utils
+import data
 
+
+# Tune complete
 def mfcc_cnn_model(hp): 
-    num_mel_bins = 64
-    sampling_rate = 8000
-    sequence_stride = 160
-    fft_length = 400
-    n_samples = 320000
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    model.add(InputLayer(input_shape = (320000,), dtype = 'float32'))
+    model.add(InputLayer(input_shape = (20,1251), dtype = 'float32'))
+    model.add(Reshape((20, -1, 1)))
 
-    # Convert audio to mel spectrogram -> outputs (num_mel_bins = 80, 2501)
-    model.add(MelSpectrogram(sampling_rate = sampling_rate, sequence_stride = 512, fft_length = 2048, power_to_db=True))
-    model.add(tf.keras.layers.Lambda(lambda x: utils.mel_to_mfcc(x, 30)))
-    model.add(Reshape((num_mel_bins, -1, 1)))
+    # num_filters =hp.Choice(f'num_filters', [16, 32, 64, 128])
+    # kernel_size= hp.Int(f'kernel_size', min_value = 2, max_value = 4)
+    # num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
 
-    num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
+    # tuned
+    num_filters = 16
+    kernel_size = 2
+    num_layers = 2
+
+    
     for i in range(num_layers):
         model.add(Conv2D(
-            filters=hp.Choice(f'filters_{i}', [32, 64, 128]),
-            kernel_size=hp.Int(f'kernel_size_{i}', min_value = 2, max_value = 4),
-            activation='relu'
+            num_filters,
+            kernel_size=(kernel_size, kernel_size),
+            activation='relu', 
         ))
-        model.add(MaxPool2D((2,2)))
         model.add(BatchNormalization())
+        model.add(MaxPool2D((2,2)))
 
-    model.add(Flatten())
-    # num_layers = hp.Int('num_dense_layers', min_value = 1, max_value = 4, step = 1)
-    # for i in range(num_layers): 
-    #     model.add(Dense(hp.Choice(f'dense_unit_{i}', [32, 128, 512, 2048]), activation = 'relu'))
-    model.add(Dense(512, activation = 'relu'))
+    model.add(GlobalAveragePooling2D())
+    num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
+    dense_units = hp.Choice(f'dense_units', [16, 64, 128, 256, 512])
+    for i in range(num_dense_layers): 
+        model.add(Dense(dense_units, activation = 'relu'))
     model.add(Dense(3, activation = 'softmax'))
 
     optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003, clipnorm = 1.0)
@@ -49,114 +54,87 @@ def mfcc_cnn_model(hp):
     model.summary()
     return model
 
-
 def mfcc_model_bilstm(hp):
-    num_mel_bins = 64
-    sampling_rate = 8000
-    sequence_stride = 160
-    fft_length = 400
-    n_samples = 320000
-
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    model.add(InputLayer(input_shape = (320000,), dtype = 'float32'))
+    model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
     # Convert audio to mel spectrogram -> outputs (num_mel_bins = 80, 2501)
-    model.add(MelSpectrogram(num_mel_bins = num_mel_bins, sampling_rate = sampling_rate, sequence_stride = sequence_stride, fft_length = fft_length, min_freq = 70, max_freq = 7500, power_to_db=True))
-    model.add(tf.keras.layers.Lambda(lambda x: utils.mel_to_mfcc(x, 30)))
 
-    num_layers = hp.Int('num_layers', min_value = 0, max_value = 4, step = 1)
-
+    # num_layers = hp.Int('num_layers', min_value = 0, max_value = 4, step = 1)
+    # base_units = hp.Choice(f'lstm_unit', [16, 32, 64, 128])
+    num_layers = 0 
+    base_units = 128
     for i in range(num_layers): 
-        model.add(Bidirectional(LSTM(hp.Choice(f'lstm_unit_{(i+1)}', [16, 32, 64, 128]), return_sequences=True)))
-    model.add(Bidirectional(LSTM(hp.Choice(f'lstm_unit_{num_layers}', [16, 32, 64, 128]))))
+        model.add(Bidirectional(LSTM(base_units, return_sequences=True)))
+        model.add(Dropout(0.1))
+    model.add(Bidirectional(LSTM(base_units)))
 
-    model.add(Dense(256, activation='softmax'))
+    # num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
+    # dense_units = hp.Choice(f'dense_units', [16, 32, 64, 128, 256])
+    num_dense_layers = 2
+    dense_units = 32
+    for i in range(num_dense_layers):
+        model.add(Dense(dense_units, activation = 'relu'))
     model.add(Dense(3, activation='softmax'))
     optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003, clipnorm = 1.0)
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     model.summary()
     return model 
+
 
 def mfcc_model_lstm(hp):
-    num_mel_bins = 64
-    sampling_rate = 8000
-    sequence_stride = 160
-    fft_length = 400
-    n_samples = 320000
-
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    model.add(InputLayer(input_shape = (320000,), dtype = 'float32'))
-    # Convert audio to mel spectrogram -> outputs (num_mel_bins = 80, 2501)
-    model.add(MelSpectrogram(num_mel_bins = num_mel_bins, sampling_rate = sampling_rate, sequence_stride = sequence_stride, fft_length = fft_length, min_freq = 70, max_freq = 7500, power_to_db=True))
-    model.add(tf.keras.layers.Lambda(lambda x: utils.mel_to_mfcc(x, 30)))
+    model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
 
-    num_layers = hp.Int('num_layers', min_value = 0, max_value = 4, step = 1)
-
+    # Tuned lstm
+    # num_layers = hp.Int('num_layers', min_value = 0, max_value = 4, step = 1)
+    # lstm_units = hp.Choice(f'lstm_units', [16, 32, 64, 128, 256])
+    num_layers = 4
+    lstm_units = 128 
     for i in range(num_layers): 
-        model.add(LSTM(hp.Choice(f'lstm_unit_{(i+1)}', [16, 32, 64, 128]), return_sequences=True))
-    model.add(LSTM(hp.Choice(f'lstm_unit_{num_layers}', [16, 32, 64, 128])))
+        model.add(LSTM(lstm_units, return_sequences=True))
+    model.add(LSTM(lstm_units))
 
-    model.add(Dense(256, activation='softmax'))
+    num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
+    dense_units = hp.Choice(f'dense_units', [16, 32, 64, 128, 256])
+    for i in range(num_dense_layers):
+        model.add(Dense(dense_units, activation = 'relu'))
     model.add(Dense(3, activation='softmax'))
     optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003, clipnorm = 1.0)
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     model.summary()
     return model 
 
-def mfcc_model_lstm(hp): 
-    num_mel_bins = 64
-    sampling_rate = 8000
-    sequence_stride = 160
-    fft_length = 400
-    n_samples = 320000
-
-    model = tf.keras.models.Sequential()
-    # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    model.add(InputLayer(input_shape = (320000,), dtype = 'float32'))
-    # Convert audio to mel spectrogram -> outputs (num_mel_bins = 80, 2501)
-    model.add(MelSpectrogram(num_mel_bins = num_mel_bins, sampling_rate = sampling_rate, sequence_stride = sequence_stride, fft_length = fft_length, min_freq = 70, max_freq = 7500, power_to_db=True))
-    model.add(tf.keras.layers.Lambda(lambda x: utils.mel_to_mfcc(x, 30)))
-
-    num_lstm_base_units = hp.Choice('num_lstm_base_units', values = [16, 32, 64, 128])
-    num_lstm_layers = hp.Int('num_lstm_layers', min_value = 0, max_value = 5, step = 1)
-    for i in range(num_lstm_layers, 0, -1): 
-        model.add(tf.keras.layers.LSTM(num_lstm_base_units * (2 ** i), return_sequences = True))
-    model.add(tf.keras.layers.LSTM(num_lstm_base_units))
-
-    model.add(Dense(3, activation='softmax'))
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003, clipnorm = 1.0)
-    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
-    model.summary()
-    return model 
+###########
 
 def romero_cnn(hp): 
-    num_mel_bins = 64
-    sampling_rate = 8000
-    sequence_stride = 160
-    fft_length = 400
-    n_samples = 320000
 
     model = tf.keras.models.Sequential()
-    model.add(InputLayer(input_shape = (320000,), dtype = 'float32'))
-    model.add(MelSpectrogram(num_mel_bins = num_mel_bins, sampling_rate = sampling_rate, sequence_stride = sequence_stride, fft_length = fft_length, min_freq = 70, max_freq = 7500))
-    model.add(Normalization(axis = [1,2]))
-    model.add(Reshape((num_mel_bins, -1, 1)))
+    model.add(InputLayer(input_shape = (128, 1251), dtype = 'float32'))
+    model.add(Reshape((128, -1, 1)))
 
-    num_kernels = hp.Choice('num_kernels_base', values = [16, 32, 64, 128])
-    kernel_size = hp.Int('num_layers', min_value = 2, max_value = 4, step = 1)
+    # num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
+    # num_kernels = hp.Choice('num_kernels_base', values = [16, 32, 64, 128])
+    # filter_size = hp.Int('filter_size', min_value = 2, max_value = 4, step = 1)
+    num_layers = 4
+    num_kernels = 32 
+    filter_size = 2
 
-    for i in range(3): 
-        model.add(Conv2D(num_kernels * (2 ** i), (kernel_size, kernel_size), activation = 'relu'))
-        model.add(Dropout(0.3))
+    for i in range(num_layers): 
+        model.add(Conv2D(num_kernels, (filter_size, filter_size), activation = 'relu'))
         model.add(MaxPool2D((3,2)))
         model.add(BatchNormalization())
+        model.add(Dropout(0.3))
 
-    model.add(Flatten())
-    model.add(Dense(512, activation = 'relu'))
+    model.add(GlobalAveragePooling2D())
+    num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
+    dense_units = hp.Choice('dense_units', values = [16, 32, 64, 128, 256])
+    for i in range(num_dense_layers):
+        model.add(Dense(dense_units, activation = 'relu'))
     model.add(Dense(3, activation = 'softmax'))
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0001)
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003)
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     return model
 
@@ -189,7 +167,35 @@ def mel_spec_lstm(hp):
     model.summary()
     return model
 
-tune(mfcc_cnn_model, 'mfcc_cnn_model_kernels', 'audio')
-tune(mfcc_model_bilstm, 'mfcc_bilstm_model_lstm_units', 'audio')
-tune(mfcc_model_lstm, 'mfcc_lstm_model_lstm_units', 'audio')
-tune(mfcc_cnn_model, 'mfcc_cnn_model_kernels', 'audio')
+def mel_spec_png_cnn(hp): 
+
+    num_filters = hp.Choice('num_filters', values = [16, 64, 128, 512])
+    filter_size = hp.Int('num_cnn_layers', min_value = 2, max_value = 4, step = 1)
+    num_layers = hp.Int('num_cnn_layers', min_value = 0, max_value = 5, step = 1)
+    
+    model = Sequential()
+    model.add(InputLayer(input_shape = (224, 224, 3), dtype = 'float32'))
+
+    for i in range(num_layers): 
+        model.add(Conv2D(num_filters, (filter_size, filter_size), kernel_regularizer=l1(0.005)))
+        model.add(BatchNormalization())
+        model.add(ReLU())
+        model.add(MaxPool2D((2,2)))
+        model.add(Dropout(0.3))
+
+    model.add(Flatten())
+    model.add(Dense(256, activation = 'relu'))
+    model.add(Dense(3, activation = 'softmax'))
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    model.summary()
+    return model
+
+
+data_loader = DataLoader()
+mel_spec_png = data_loader.load_mel_spec_png()
+audio_mfcc = data_loader.load_subset_data('audio_mfcc', dataset = 'audio_features')
+audio_mel_spec = data_loader.load_subset_data('audio_mel_spec', dataset = 'audio_features')
+
+tune(romero_cnn, audio_mel_spec, 'romero_dense', data_loader.TRAIN_STEPS_PER_EPOCH, data_loader.VALID_STEPS_PER_EPOCH)

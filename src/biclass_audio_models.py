@@ -7,7 +7,7 @@ import os
 import sys 
 script_dir = os.getcwd()
 sys.path.append(script_dir)
-import utils as utils
+import data as data
 import train
 
 def mel_spec_png_cnn(): 
@@ -64,8 +64,8 @@ def mel_spec_png_cnn():
 
 
 def mel_to_mfcc_std_wrapper(x): 
-    mfcc = utils.mel_to_mfcc(x, 50)
-    std_mfcc = utils.standardize(mfcc)
+    mfcc = data.mel_to_mfcc(x, 50)
+    std_mfcc = data.standardize(mfcc)
     return std_mfcc
 
 def mfcc_cnn_model(): 

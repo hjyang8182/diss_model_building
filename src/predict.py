@@ -3,7 +3,7 @@ import numpy as np
 import os
 import pandas as pd
 import json
-import utils as utils
+import data as data
 import matplotlib.pyplot as plt
 
 from train import delta_model_data

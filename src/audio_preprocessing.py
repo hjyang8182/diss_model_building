@@ -11,9 +11,8 @@ from noisereduce import reduce_noise
 
 script_dir = os.getcwd()
 sys.path.append(script_dir)
-import utils
+from data import DataLoader
 
-os.chdir('/home/hy381/rds/hpc-work/segmented_data_new')
 
 data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
 data_labels = pd.read_csv(data_labels_path)
@@ -34,10 +33,12 @@ def compute_mel_spec(audio, num_bins = 64, sr = 8000, n_fft = 2048, hop_length =
     return log_mel_spec
 
 def save_mel_spec(spec_db, filename): 
+    spec_db = spec_db[:, 3:-3]
     plt.figure(figsize = (6, 6))
     librosa.display.specshow(spec_db, sr=8000)  # Adjust sample rate if needed
     plt.axis('off')  # Remove axes for a clean image
-    plt.savefig(filename, bbox_inches='tight', pad_inches=0)
+    plt.tight_layout(pad = 0)
+    plt.savefig(filename, bbox_inches = 'tight', pad_inches=0)
     plt.close()
 
 def make_fname(filename): 
@@ -45,16 +46,18 @@ def make_fname(filename):
     png_filename = "/".join(png_filename.split("/")[-2:])
     return png_filename
 
-data_files = np.concatenate(utils.split_train_valid_test_subject())
+os.chdir('/home/hy381/rds/hpc-work/audio_feature_data/')
+data_loader = DataLoader()
+data_files = data_loader.split_train_valid_test()[2]
 dataset = tf.data.TFRecordDataset(data_files)
-for i, record in enumerate(dataset): 
+parsed_dataset = data_loader.parse_audio_feature_tf_record_dataset(dataset, ['audio_mel_spec'], 'train')
+for i, record in enumerate(parsed_dataset): 
     data_file = data_files[i]
     subject = os.path.dirname(data_file)
     segment_name = os.path.splitext(os.path.basename(data_file))[0]
-    audio, _, _ = utils._parse_data(record, ['audio'], dataset_type='train')
-    spec_db = compute_mel_spec(audio)
+    mel_spec, _, _ = record
     mel_spec_file = os.path.join('/home/hy381/rds/hpc-work/segmented_data_new', subject, f"{segment_name}.png")
-    save_mel_spec(spec_db, mel_spec_file)
+    save_mel_spec(mel_spec.numpy(), mel_spec_file)
     print(f"Mel spectrogram saved for {data_file} to {mel_spec_file}")
-    data_labels.loc[data_labels['file'] == data_file, 'mel_spec'] = True
-data_labels.to_csv(data_labels_path, index = False)
+#     data_labels.loc[data_labels['file'] == data_file, 'mel_spec'] = True
+# data_labels.to_csv(data_labels_path, index = False)
