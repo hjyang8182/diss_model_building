@@ -6,7 +6,8 @@ import librosa
 import pandas as pd
 import math
 import tensorflow as tf
-import data as data
+# import data as data
+from data import DataLoader
 from noisereduce import reduce_noise
 
 data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
@@ -18,6 +19,8 @@ def _float_feature(value):
 
 def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
+
+data_loader = DataLoader()
 
 class Preprocessor: 
     def apply_delta(self, spo2_np): 
@@ -70,7 +73,7 @@ class Preprocessor:
     def save_data_tfrecord(self, files, save_dir = '/home/hy381/rds/hpc-work/audio_feature_data'): 
         dataset = tf.data.TFRecordDataset(files)
         
-        dataset_parsed = data.parse_tf_record_dataset(dataset, ['audio'], dataset_type='train')
+        dataset_parsed = data_loader.parse_raw_tf_record_dataset(dataset, ['audio'], dataset_type='train')
         for i, record in enumerate(dataset_parsed): 
             audio, label, _ = record
             file = files[i]
@@ -90,7 +93,7 @@ class Preprocessor:
             # Compute delta metric for spo2
         
             # Compute denoising for audio 
-            denoised_audio = self.apply_denoise(audio.numpy(), sr = 8000)
+            denoised_audio = self.apply_denoise(audio.numpy())
 
             # Compute mel spectrogram, mfcc for denoised audio 
             mel_spec_audio = self.compute_mel_spec(denoised_audio)
@@ -100,13 +103,16 @@ class Preprocessor:
             mel_spec_shape = mel_spec_audio.shape
             mfcc_shape = mfcc_audio.shape
 
-            # data_example = self._data_example(denoised_audio, mel_spec_audio, mfcc_audio, mel_spec_shape, mfcc_shape, label)
+            data_example = self._data_example(denoised_audio, mel_spec_audio, mfcc_audio, mel_spec_shape, mfcc_shape, label)
 
-            # record_fpath = os.path.join(subject_dir, segment_fpath)
-            # with tf.io.TFRecordWriter(record_fpath) as writer:
-            #     writer.write(data_example)
-            # print(f"Feature TFRecord saved for {record_fpath}")
+            record_fpath = os.path.join(subject_dir, segment_fpath)
+            with tf.io.TFRecordWriter(record_fpath) as writer:
+                writer.write(data_example)
+            print(f"Feature TFRecord saved for {record_fpath}")
     
-train_files, valid_files, test_files = data.split_train_valid_test()
+train_files, valid_files, test_files = data_loader.split_train_valid_test()
 processor = Preprocessor()
+# processor.save_data_tfrecord(train_files)
+processor.save_data_tfrecord(valid_files)
 processor.save_data_tfrecord(test_files)
+

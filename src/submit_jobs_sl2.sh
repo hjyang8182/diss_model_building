@@ -3,7 +3,7 @@
 #SBATCH --output=/home/hy381/model_training/outputs/%x_%j.out  # Saves output as job_name_jobID.out
 #SBATCH --nodes=1              #! node count
 #SBATCH --ntasks=4             #! total number of tasks across all node
-#SBATCH --time=2:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mail-type=begin        #! send email when job begins
 #SBATCH --mail-type=end          #! send email when job ends
 #SBATCH --mail-type=fail         #! send email if job fails

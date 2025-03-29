@@ -8,8 +8,8 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.callbacks import CSVLogger, ReduceLROnPlateau, ModelCheckpoint
 
 print("Num GPUs Available:", len(tf.config.list_physical_devices('GPU')))
-
-def test_model(model_fn, model_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH): 
+# tf.config.optimizer.set_jit(True)  # Enable XLA
+def test_model(model_fn, model_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH, epochs = 50): 
 
     train_data, valid_data, test_data = model_data
     
@@ -22,14 +22,19 @@ def test_model(model_fn, model_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOC
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 15, restore_best_weights = True)
     
     # Fit the model 
-    csv_logger = CSVLogger(f'/home/hy381/model_training/src/{model_fn.__name__}.log')
-    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=7, verbose=1, epsilon=1e-4, mode='min')
+    def scheduler(epoch, lr):
+        if epoch % 50 == 0 and epoch > 0:  # Every 30 epochs
+            lr = lr * 0.1  # Decrease by a factor of 10
+        return lr
 
-    history = model.fit(train_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, epochs = 50, verbose = 1, validation_data = valid_data, callbacks = [csv_logger, reduce_lr_loss], validation_steps = VALID_STEPS_PER_EPOCH)
+    csv_logger = CSVLogger(f'/home/hy381/model_training/src/{model_fn.__name__}.log')
+    scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
+
+    history = model.fit(train_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [csv_logger, scheduler], validation_steps = VALID_STEPS_PER_EPOCH)
 
     return history
 
-def train_model(model_fn, model_name, model_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH): 
+def train_model(model_fn, model_name, model_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH, epochs = 50): 
     models_dir = '/home/hy381/rds/hpc-work/models'
 
     train_data, valid_data, test_data = model_data
@@ -55,10 +60,10 @@ def train_model(model_fn, model_name, model_data, TRAIN_STEPS_PER_EPOCH, VALID_S
     
     # Callbacks for the model 
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 5, restore_best_weights = True)
-    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, save_best_only=True)
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_accuracy', save_best_only=True, mode = "max", verbose =1)
     
     # Fit the model 
-    history = model.fit(train_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, epochs = 50, verbose = 1, validation_data = valid_data, callbacks = [checkpoint], validation_steps = VALID_STEPS_PER_EPOCH)
+    history = model.fit(train_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [checkpoint], validation_steps = VALID_STEPS_PER_EPOCH)
 
     with open(output_file, 'w') as file: 
         json.dump(history.history, file)
@@ -66,7 +71,7 @@ def train_model(model_fn, model_name, model_data, TRAIN_STEPS_PER_EPOCH, VALID_S
     return history
 
 
-def train_model_full_data(model_fn, model_name, model_data, FULL_TRAIN_STEPS_PER_EPOCH, FULL_VALID_STEPS_PER_EPOCH): 
+def train_model_full_data(model_fn, model_name, model_data, FULL_TRAIN_STEPS_PER_EPOCH, FULL_VALID_STEPS_PER_EPOCH, epochs = 50): 
     models_dir = '/home/hy381/rds/hpc-work/models'
 
     train_data, valid_data, test_data = model_data
@@ -92,12 +97,12 @@ def train_model_full_data(model_fn, model_name, model_data, FULL_TRAIN_STEPS_PER
     
     # Callbacks for the model 
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 5, restore_best_weights = True)
-    checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=model_file, save_best_only=True)
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_accuracy', save_best_only=True, mode = "max", verbose =1)
     csv_logger = CSVLogger(log_file)
-    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=7, verbose=1, epsilon=1e-4, mode='min')
+    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1, epsilon=1e-4, mode='min')
 
     # Fit the model 
-    history = model.fit(train_data, steps_per_epoch = FULL_TRAIN_STEPS_PER_EPOCH, epochs = 50, verbose = 1, validation_data = valid_data, callbacks = [checkpoint, csv_logger, reduce_lr_loss], validation_steps = FULL_VALID_STEPS_PER_EPOCH)
+    history = model.fit(train_data, steps_per_epoch = FULL_TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [checkpoint, csv_logger, reduce_lr_loss], validation_steps = FULL_VALID_STEPS_PER_EPOCH)
 
     with open(output_file, 'w') as file: 
         json.dump(history.history, file)

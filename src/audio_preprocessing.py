@@ -35,8 +35,9 @@ def compute_mel_spec(audio, num_bins = 64, sr = 8000, n_fft = 2048, hop_length =
 def save_mel_spec(spec_db, filename): 
     spec_db = spec_db[:, 3:-3]
     plt.figure(figsize = (6, 6))
-    librosa.display.specshow(spec_db, sr=8000)  # Adjust sample rate if needed
+    librosa.display.specshow(spec_db , sr=8000, x_axis="time", y_axis="linear")
     plt.axis('off')  # Remove axes for a clean image
+    plt.ylim(0, 1000)
     plt.tight_layout(pad = 0)
     plt.savefig(filename, bbox_inches = 'tight', pad_inches=0)
     plt.close()
@@ -59,5 +60,5 @@ for i, record in enumerate(parsed_dataset):
     mel_spec_file = os.path.join('/home/hy381/rds/hpc-work/segmented_data_new', subject, f"{segment_name}.png")
     save_mel_spec(mel_spec.numpy(), mel_spec_file)
     print(f"Mel spectrogram saved for {data_file} to {mel_spec_file}")
-#     data_labels.loc[data_labels['file'] == data_file, 'mel_spec'] = True
-# data_labels.to_csv(data_labels_path, index = False)
+    with open('/home/hy381/model_training/outputs/saved_mel_spec_valid.txt', 'a') as file: 
+        file.write(data_file + '\n')

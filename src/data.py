@@ -1,16 +1,27 @@
 import tensorflow as tf
 import numpy as np
-from scipy.fft import fft
-from scipy.signal import savgol_filter
 from sklearn.utils.class_weight import compute_class_weight
 import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from noisereduce import reduce_noise
+# from noisereduce import reduce_noise
+from scipy.signal import butter, sosfiltfilt
+import librosa
 
 data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
 data_labels = pd.read_csv(data_labels_path)
 AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+
+def extract_features(audio): 
+    audio_np = librosa.resample(audio.numpy(), orig_sr = 8000, target_sr = 16000)
+    feature = feature_extractor(audio_np, sampling_rate = 16000)
+    feature = feature['input_values'][0]    
+    feature = base_model(feature)
+    return feature
+
+def tf_extract_features(audio): 
+    return tf.py_function(extract_features, [audio], tf.float32)
 
 
 @tf.function
@@ -43,48 +54,73 @@ def apply_window(delta_spo2):
     return delta_frames
 
 @tf.function
-def apply_denoise(audio):
-    def denoise_wrapper(audio_np): 
-        denoised_audio = reduce_noise(audio_np, sr = 8000)
-        denoised_audio_tensor = tf.convert_to_tensor(denoised_audio, dtype = tf.float32)
-        return denoised_audio_tensor
+def mel_spec(audio):
+
+    def _butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
+        nyq = 0.5 * fs
+        low = lowcut / nyq
+        high = highcut / nyq
+        sos = butter(order, [low,high], btype='band', analog=False, output='sos')
+        y = sosfiltfilt(sos, data)
+        return y
+
+    def mel_spec_wrapper(audio_np, window_size = 0.25, hop_size = 0.125): 
+        sr = 8000
+        
+        n_fft = int(window_size * sr)
+        hop_length = int(hop_size * sr)
+
+        audio_np = _butter_bandpass_filter(audio_np, 100, 3400, 8000)
+
+        mel_spec = librosa.feature.melspectrogram(y = audio_np, sr = sr, n_fft = n_fft, hop_length = hop_length)
+        log_mel_spec = librosa.power_to_db(mel_spec, ref = np.max)
+        spec = tf.convert_to_tensor(log_mel_spec, dtype = tf.float32)
+        return spec
     
-    denoised_audio = tf.numpy_function(denoise_wrapper, [audio], tf.float32)
-    return denoised_audio
+    spec = tf.numpy_function(mel_spec_wrapper, [audio], tf.float32)
+    return spec
 
-
+def apply_pca(audio):
+    def pca_wrapper(audio_np):
+        pca = PCA(n_components = 100)
+        audio_feature_pca = pca.fit_transform(audio_np.reshape(1, -1))
+        print(audio_feature_pca[0].shape)
+        audio_feature_pca = tf.convert_to_tensor(audio_feature_pca[0], dtype=tf.float32)
+        return audio_feature_pca
+    audio_pca = tf.numpy_function(pca_wrapper, [audio], tf.float32)
+    return audio_pca
+    
 class DataLoader(): 
-    def __init__(self, subset_train_count = 8000, subset_test_valid_count = 800, train_batch_size = 128, valid_test_batch_size = 32):
+    def __init__(self, subset_train_count = 8000, subset_test_valid_count = 800, train_batch_size = 128):
         train_files, valid_files, test_files = self.split_train_valid_test()
 
         self.train_batch_size = train_batch_size
-        self.valid_test_batch_size = valid_test_batch_size 
 
         self.full_train_count = len(train_files) 
         self.full_valid_count = len(valid_files) 
         self.full_test_count = len(test_files)
 
-        self.FULL_TRAIN_STEPS_PER_EPOCH = self.full_train_count//128
-        self.FULL_VALID_STEPS_PER_EPOCH = self.full_valid_count//32 -1
+        self.FULL_TRAIN_STEPS_PER_EPOCH = self.full_train_count//self.train_batch_size
+        self.FULL_VALID_STEPS_PER_EPOCH = self.full_valid_count//self.train_batch_size -1
 
         self.subset_train_count = subset_train_count 
         self.subset_valid_count = subset_test_valid_count 
         self.subset_test_count = subset_test_valid_count 
-        self.TRAIN_STEPS_PER_EPOCH = self.subset_train_count//128
-        self.VALID_STEPS_PER_EPOCH = self.subset_valid_count//32 -1
+        self.TRAIN_STEPS_PER_EPOCH = self.subset_train_count//self.train_batch_size
+        self.VALID_STEPS_PER_EPOCH = self.subset_valid_count//self.train_batch_size -1
 
-    def load_full_data(self, feature, window_spo2 = False, dataset = 'default'): 
-        full_data = self.prepare_data(feature = feature, p_train = 0.7, p_valid = 0.15, window_spo2=window_spo2, dataset = dataset)
+    def load_full_data(self, features, apply_delta = False, window_spo2 = False, parse_type = 'default'): 
+        full_data = self.prepare_data(features = features, p_train = 0.7, p_valid = 0.15, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type)
         return full_data
 
-    def load_subset_data(self, feature, window_spo2 = False, dataset = 'default'): 
-        data_subset = self.prepare_data(feature = feature, subset = True, train_batch_size= self.train_batch_size, valid_test_batch_size= self.valid_test_batch_size, window_spo2 = window_spo2, dataset = dataset)
+    def load_subset_data(self, features, window_spo2 = False, parse_type = 'default'): 
+        data_subset = self.prepare_data(features = features, subset = True, window_spo2 = window_spo2, parse_type = parse_type)
         return data_subset
 
-    def load_mel_spec_png(self): 
-        return self.load_mel_spec_images()
+    def load_mel_spec_png(self, subset = False): 
+        return self.load_mel_spec_images(subset)
     
-    def _parse_data_default(self, proto, features, dataset_type, window_spo2 = False, biclass = False):
+    def _parse_data_default(self, proto, features, dataset_type, apply_delta = False, window_spo2 = False):
         audio_sample_rate = 8000
         keys_to_features = {
             'label': tf.io.FixedLenFeature([1], tf.int64),
@@ -101,26 +137,38 @@ class DataLoader():
             
             label = tf.squeeze(label)
 
-            if biclass: 
-                label = tf.where(label == tf.constant(2, dtype=tf.int64), tf.constant(1, dtype=tf.int64), label)
-                label = tf.where(label == tf.constant(3, dtype=tf.int64), tf.constant(1, dtype=tf.int64), label)
-            
-            else: 
-                label = tf.where(label == tf.constant(3, dtype=tf.int64), tf.constant(2, dtype=tf.int64), label)
+            label = tf.where(label == tf.constant(3, dtype=tf.int64), tf.constant(2, dtype=tf.int64), label)
 
             weight = tf.gather(class_weights, label)
             label_enc = tf.one_hot(label, 3)
             label_enc.set_shape([3])
             if 'spo2' in features: 
                 spo2 = parsed_features['spo2']
-                delta_spo2 = apply_delta(spo2)
-                if window_spo2: 
-                    windowed_spo2 = apply_window(delta_spo2)
-                    parsed_features['spo2'] = windowed_spo2
-                    parsed_features['spo2'].set_shape([8, 5])
+                if apply_delta: 
+                    spo2 = apply_delta(spo2)
+                    if window_spo2: 
+                        windowed_spo2 = apply_window(spo2)
+                        parsed_features['spo2'] = windowed_spo2
+                        parsed_features['spo2'].set_shape([8, 5])
+                    else: 
+                        parsed_features['spo2'] = spo2
+                        parsed_features['spo2'].set_shape([20])
                 else: 
-                    parsed_features['spo2'] = delta_spo2
-                    parsed_features['spo2'].set_shape([20])
+                    if window_spo2: 
+                        windowed_spo2 = apply_window(spo2)
+                        parsed_features['spo2'] = windowed_spo2
+                        parsed_features['spo2'].set_shape([18, 5])
+                    else: 
+                        parsed_features['spo2'].set_shape([40])
+
+            if 'audio' in features: 
+                audio = parsed_features['audio']
+                audio_feature = mel_spec(audio)
+                parsed_features['audio'] = tf.convert_to_tensor(audio_feature, dtype = tf.float32) 
+                parsed_features['audio'].set_shape([128, 321])
+            # concat_features = tf.concat([audio_feature_pca, parsed_features['spo2']], axis = 0)
+            # parsed_features['concat_features'] = concat_features
+            # parsed_features['concat_features'].set_shape([140])
 
             return_vals = [parsed_features[feature] for feature in features]
             return_vals.append(label_enc)
@@ -165,29 +213,38 @@ class DataLoader():
             print(e) 
             return None
         
-    def parse_raw_tf_record_dataset(self, dataset, features, dataset_type, window_spo2 = False, biclass = False):
-        parsed_data = dataset.map(lambda x : self._parse_data_default(x, features=features, dataset_type= dataset_type, window_spo2=window_spo2))
+    def parse_raw_tf_record_dataset(self, dataset, features, dataset_type, apply_delta = False, window_spo2 = False):
+        parsed_data = dataset.map(lambda x : self._parse_data_default(x, features=features, dataset_type= dataset_type, apply_delta = apply_delta, window_spo2=window_spo2), num_parallel_calls=tf.data.AUTOTUNE)
+        # dataset = dataset.map(preprocess_function, num_parallel_calls=tf.data.AUTOTUNE)
+
         # parsed_data = parsed_data.filter(lambda *x: x[0] is not None)
         return parsed_data
     
-    def parse_audio_feature_tf_record_dataset(self, dataset, features, dataset_type, window_spo2 = False, biclass = False):
-        parsed_data = dataset.map(lambda x : self._parse_audio_features(x, features=features, dataset_type= dataset_type))
+    def parse_audio_feature_tf_record_dataset(self, dataset, features, dataset_type):
+        parsed_data = dataset.map(lambda x : self._parse_audio_features(x, features=features, dataset_type= dataset_type), num_parallel_calls=tf.data.AUTOTUNE)
         return parsed_data
 
-    def split_train_valid_test(self, p_train = 0.7, p_valid = 0.15):
+    def split_train_valid_test(self, p_train = 0.8, p_valid = 0.10):
         data_labels_no_mixed = data_labels.loc[data_labels['label'] != 3]
         all_subjects = np.unique(data_labels_no_mixed['subject'].values)
-        p_train = 0.7
-        p_valid = 0.15
 
         p_test = 1 - (p_train + p_valid)
         train_subjects, test_valid_subjects = train_test_split(all_subjects, test_size = (p_valid + p_test), random_state=42)
         valid_subjects, test_subjects = train_test_split(test_valid_subjects, test_size = p_test/(p_valid + p_test), random_state=42)
 
-        np.random.seed(42)
         train_subjects_df = data_labels_no_mixed.loc[data_labels_no_mixed['subject'].isin(train_subjects)]
-        sampled_train_df = train_subjects_df.groupby('subject', group_keys=False).apply(lambda x : x.sample(frac = 0.5))
-        sampled_train_df = sampled_train_df.reset_index(drop = True)
+
+        len_hypopnea = len(train_subjects_df.loc[train_subjects_df['label'] == 1])
+    
+        hypopnea_train = train_subjects_df.loc[train_subjects_df['label'] == 1, 'file'].values.astype(str)
+        apnea_train = train_subjects_df.loc[train_subjects_df['label'] == 2, 'file'].values.astype(str)
+        normal_train = train_subjects_df.loc[train_subjects_df['label'] == 0, 'file'].values.astype(str)
+        
+        np.random.seed(42)
+        apnea_train, normal_train = np.random.choice(apnea_train, len_hypopnea, replace = False), np.random.choice(normal_train, len_hypopnea, replace = False)
+        train_files = np.concatenate([normal_train, apnea_train, hypopnea_train]).astype(str)
+        # sampled_train_df = train_subjects_df.groupby('subject', group_keys=False).apply(lambda x : x.sample(frac = 0.5))
+        # sampled_train_df = sampled_train_df.reset_index(drop = True)
 
         np.random.seed(42)
         valid_subjects_df = data_labels_no_mixed.loc[data_labels_no_mixed['subject'].isin(valid_subjects)]
@@ -199,14 +256,15 @@ class DataLoader():
         sampled_test_df = test_subjects_df.groupby('subject', group_keys=False).apply(lambda x : x.sample(frac = 0.5))
         sampled_test_df = sampled_test_df.reset_index(drop = True)
 
-        train_files = sampled_train_df['file'].values.astype(str)
+        # train_files = sampled_train_df['file'].values.astype(str)
         valid_files = sampled_valid_df['file'].values.astype(str)
         test_files = sampled_test_df['file'].values.astype(str)
         
+        np.random.seed(42)
+        train_files, valid_files, test_files = np.random.permutation(train_files), np.random.permutation(valid_files), np.random.permutation(test_files)
         # train_files = data_labels.loc[data_labels['subject'].isin(train_subjects), 'file'].values
         # valid_files = data_labels.loc[data_labels['subject'].isin(valid_subjects), 'file'].values
         # test_files = data_labels.loc[data_labels['subject'].isin(test_subjects), 'file'].values
-
         return train_files, valid_files, test_files
     
 
@@ -214,8 +272,9 @@ class DataLoader():
 
         train_files, valid_files, test_files = self.split_train_valid_test()
         
-        np.random.seed(42)
-        train_files_subset = np.random.choice(train_files, train_length, replace = False) 
+        train_df = data_labels.loc[data_labels['file'].isin(train_files)]
+        train_subset_df = train_df.groupby("label").sample(n=train_length//3, random_state = 42)
+        train_files_subset = train_subset_df['file'].values.astype(str)
 
         np.random.seed(42)
         valid_files_subset = np.random.choice(valid_files, valid_length, replace = False) 
@@ -225,7 +284,23 @@ class DataLoader():
 
         return train_files_subset, valid_files_subset, test_files_subset
 
-    def prepare_data(self, feature, subset = False, p_train = 0.7 , p_valid = 0.15,train_batch_size = 128, valid_test_batch_size = 32, window_spo2 = False, dataset = 'default'):
+    def load_tfrecord_dataset(self, file_list, features, parse_type, dataset_type, apply_delta = False, window_spo2 = False):
+        dataset = tf.data.Dataset.from_tensor_slices(file_list)
+
+        # Interleave multiple TFRecord files in parallel
+        dataset = dataset.interleave(
+            lambda filename: tf.data.TFRecordDataset(filename, buffer_size=1000000).shuffle(10000),
+            cycle_length=4,  # Number of files read in parallel
+            num_parallel_calls=AUTOTUNE  # Optimize for performance
+        )
+        if parse_type == 'default': 
+            dataset = self.parse_raw_tf_record_dataset(dataset, features, dataset_type=dataset_type, apply_delta = apply_delta,  window_spo2=window_spo2)
+        else: 
+            dataset = self.parse_audio_feature_tf_record_dataset(dataset, features, dataset_type=dataset_type)
+                
+        return dataset
+
+    def prepare_data(self, features, subset = False, p_train = 0.7 , p_valid = 0.15, apply_delta = False, window_spo2 = False, parse_type = 'default'):
         """
         Loads and batches the training, validation, test data and returns the result.
 
@@ -246,24 +321,20 @@ class DataLoader():
         else: 
             train_files, valid_files, test_files = self.split_train_valid_test() 
         
-        if dataset == 'default': 
+        
+        if parse_type == 'default': 
             base_dir = '/home/hy381/rds/hpc-work/segmented_data_new/'
             train_files = np.char.add(base_dir, train_files)
             valid_files = np.char.add(base_dir, valid_files)
             test_files = np.char.add(base_dir, test_files)
 
-            train_data_tf = tf.data.TFRecordDataset(train_files)
-            train_data = self.parse_raw_tf_record_dataset(train_data_tf, [feature], dataset_type= 'train', window_spo2=window_spo2)
-            train_data_batched = train_data.batch(train_batch_size, drop_remainder=True).repeat().prefetch(AUTOTUNE)
+            train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', apply_delta = apply_delta, window_spo2 = window_spo2)
+            valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', apply_delta = apply_delta, window_spo2 = window_spo2)
+            test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', apply_delta = apply_delta, window_spo2 = window_spo2)
 
-            valid_data_tf = tf.data.TFRecordDataset(valid_files)
-            valid_data = self.parse_raw_tf_record_dataset(valid_data_tf,  [feature], dataset_type= 'valid', window_spo2=window_spo2)
-            valid_data_batched = valid_data.batch(valid_test_batch_size, drop_remainder = True).repeat().prefetch(AUTOTUNE)
-
-            test_data_tf = tf.data.TFRecordDataset(test_files)
-            test_data = self.parse_raw_tf_record_dataset(test_data_tf, [feature],  dataset_type= 'test', window_spo2=window_spo2)
-            test_data_batched = test_data.batch(valid_test_batch_size, drop_remainder = True).prefetch(AUTOTUNE)
-
+            # if feature == 'audio':
+            #     # (1999, 768)
+            #     train_dataset, valid_dataset, test_dataset = train_dataset.map(tf_extract_features), valid_dataset.map(tf_extract_features), test_dataset.map(tf_extract_features)
         else: 
             base_dir = '/home/hy381/rds/hpc-work/audio_feature_data/'
 
@@ -271,18 +342,14 @@ class DataLoader():
             valid_files = np.char.add(base_dir, valid_files)
             test_files = np.char.add(base_dir, test_files)
 
-            train_data_tf = tf.data.TFRecordDataset(train_files)
-            train_data = self.parse_audio_feature_tf_record_dataset(train_data_tf, [feature], dataset_type= 'train', window_spo2=window_spo2)
-            train_data_batched = train_data.batch(train_batch_size, drop_remainder=True).repeat().prefetch(AUTOTUNE)
-
-            valid_data_tf = tf.data.TFRecordDataset(valid_files)
-            valid_data = self.parse_audio_feature_tf_record_dataset(valid_data_tf,  [feature], dataset_type= 'valid', window_spo2=window_spo2)
-            valid_data_batched = valid_data.batch(valid_test_batch_size, drop_remainder = True).repeat().prefetch(AUTOTUNE)
-
-            test_data_tf = tf.data.TFRecordDataset(test_files)
-            test_data = self.parse_audio_feature_tf_record_dataset(test_data_tf, [feature],  dataset_type= 'test', window_spo2=window_spo2)
-            test_data_batched = test_data.batch(valid_test_batch_size, drop_remainder = True).prefetch(AUTOTUNE)
+            train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', window_spo2 = window_spo2)
+            valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', window_spo2 = window_spo2)
+            test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', window_spo2 = window_spo2)
             
+        train_data_batched = train_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
+        valid_data_batched = valid_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
+        test_data_batched = test_dataset.batch(1).prefetch(AUTOTUNE)
+        
         return train_data_batched, valid_data_batched, test_data_batched
 
     def load_mel_spec_images(self, subset = False):
@@ -305,21 +372,21 @@ class DataLoader():
 
         train_labels = data_labels.loc[data_labels['file'].isin(train_files), 'label']
         train_labels = tf.convert_to_tensor(train_labels.values, dtype = tf.int32)
-        train_labels = tf.one_hot(train_labels, depth=3, dtype=tf.int32)
+        train_labels = tf.one_hot(train_labels, depth=3, dtype=tf.float32)
         train_dataset = tf.data.Dataset.from_tensor_slices((train_files_mel_spec, train_labels))
         train_dataset = train_dataset.map(lambda img, label: self.load_image(img, label, 'train')).batch(self.train_batch_size, drop_remainder = True).repeat()
 
         valid_labels = data_labels.loc[data_labels['file'].isin(valid_files), 'label']
         valid_labels = tf.convert_to_tensor(valid_labels.values, dtype = tf.int32)
-        valid_labels = tf.one_hot(valid_labels, depth=3, dtype=tf.int32)
+        valid_labels = tf.one_hot(valid_labels, depth=3, dtype=tf.float32)
         valid_dataset = tf.data.Dataset.from_tensor_slices((valid_files_mel_spec, valid_labels))
-        valid_dataset = valid_dataset.map(lambda img, label: self.load_image(img, label, 'valid')).batch(self.valid_test_batch_size, drop_remainder = True).repeat()
+        valid_dataset = valid_dataset.map(lambda img, label: self.load_image(img, label, 'valid')).batch(self.train_batch_size, drop_remainder = True).repeat()
 
         test_labels = data_labels.loc[data_labels['file'].isin(test_files), 'label']
         test_labels = tf.convert_to_tensor(test_labels.values, dtype = tf.int32)
-        test_labels = tf.one_hot(test_labels, depth=3, dtype=tf.int32)
+        test_labels = tf.one_hot(test_labels, depth=3, dtype=tf.float32)
         test_dataset = tf.data.Dataset.from_tensor_slices((test_files_mel_spec, test_labels))
-        test_dataset = test_dataset.map(lambda img, label: self.load_image(img, label, 'test')).batch(self.valid_test_batch_size, drop_remainder = True)
+        test_dataset = test_dataset.map(lambda img, label: self.load_image(img, label, 'test')).batch(1)
 
         return train_dataset, valid_dataset, test_dataset
 
@@ -330,8 +397,8 @@ class DataLoader():
         img = tf.io.read_file(image_path)  # Read file
         img = tf.image.decode_png(img, channels=3)  # Decode PNG
         img = tf.image.resize(img, [224, 224])  # Resize
-        img = img / 255.0  # Normalize
-        return img, label, weight
+        # img = img / 255.0  # Normalize
+        return img, label
     
     def return_class_weights(self): 
         train_files, valid_files, test_files = self.split_train_valid_test()
@@ -376,22 +443,5 @@ class DataLoader():
         sample_weights = np.array([class_weight_dict[label] for label in classes])
         sample_weights = tf.convert_to_tensor(sample_weights, tf.float32)
         sample_weights.set_shape([2])
-        return sample_weights
-
-
-# def mel_to_mfcc(mel_spectrogram, num_mfcc=13):
-#     # Convert the Mel Spectrogram to MFCC using TensorFlow
-#     mfccs = tf.signal.mfccs_from_log_mel_spectrograms(mel_spectrogram)  # [batch, time, num_mfcc]
+        return sample_weight
     
-#     # Keep only the desired number of MFCC coefficients (typically 13 or 20)
-#     mfccs = mfccs[:, :, :num_mfcc]
-
-#     return mfccs
-
-# def standardize(x): 
-#     # x_tensor = tf.convert_to_tensor(x, dtype = tf.float32)
-#     mean = tf.reduce_mean(x)
-#     std = tf.math.reduce_std(x)
-#     return (x - mean)/std
-
-        
