@@ -8,7 +8,7 @@ import pandas as pd
 import sys
 import keras_tuner as kt
 import matplotlib.pyplot as plt
-from data import DataLoader
+from data import ApneaDataLoader
 from tune_models import tune, visualize_hp
 
 script_dir = os.getcwd()
@@ -260,24 +260,45 @@ def mfcc_cnn_model_changing_param(hp):
 def mel_spec_cnn(hp): 
     num_filters = hp.Choice(f'num_filters', [16, 32, 64, 128])
     # kernel_size= hp.Int(f'kernel_size', min_value = 2, max_value = 4)
-    num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
+    # num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
     # num_same_layers = hp.Int('num_same_layers', min_value = 1, max_value = 4, step = 1)
     dense_units = hp.Choice(f'dense_units', [16, 32, 64, 128, 256, 512])
+    num_dense_layers = hp.Int('dense_layers', min_value = 1, max_value = 4, step = 1)
 
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
     model.add(InputLayer(input_shape = (128, 1251), dtype = 'float32'))
     model.add(Reshape((128, -1, 1)))
 
-    for i in range(num_layers): 
-        model.add(Conv2D(num_filters * 2 ** i, (2, 3), strides = (1,2), activation = 'relu', padding = 'same'))
-        model.add(BatchNormalization())
-        model.add(MaxPool2D((2,2)))
-        model.add(Dropout(0.1))
+    model.add(Conv2D(num_filters, (5,7), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (6,8), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (7,9), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (8,10), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D(2,4))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (9,11), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((3,5)))
+    model.add(Dropout(0.3))
 
     model.add(Flatten())
 
-    model.add(Dense(dense_units, activation = 'relu', kernel_regularizer=l1(0.01)))
+    for i in range(num_dense_layers):
+        model.add(Dense(dense_units, activation = 'relu', kernel_regularizer=l1(0.0001)))
     model.add(Dense(3, activation = 'softmax'))
 
     optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4)
@@ -285,50 +306,11 @@ def mel_spec_cnn(hp):
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     return model
 
-def romero_cnn_changing_params(hp): 
-    model = tf.keras.models.Sequential()
-    model.add(InputLayer(input_shape = (128, 1251), dtype = 'float32'))
-    model.add(Reshape((128, -1, 1)))
-
-    num_same_layers = hp.Int('num_same_layers', min_value = 1, max_value = 4, step = 1)
-
-    for i in range(num_same_layers): 
-        model.add(Conv2D(16, (3,3)))
-    model.add(BatchNormalization())
-    model.add(ReLU())
-    model.add(MaxPool2D((4,3)))
-    model.add(Dropout(0.3))
-
-    for i in range(num_same_layers): 
-        model.add(Conv2D(32, (3,3)))
-    model.add(BatchNormalization())
-    model.add(ReLU())
-    model.add(MaxPool2D((4,3)))
-    model.add(Dropout(0.3))
-    
-    for i in range(num_same_layers): 
-        model.add(Conv2D(64, (3,3)))
-    model.add(BatchNormalization())
-    model.add(ReLU())
-    model.add(MaxPool2D((4,3)))
-    model.add(Dropout(0.3))
-    
-    model.add(Flatten())
-    num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
-    dense_units = hp.Choice('dense_units', values = [16, 32, 64, 128, 256])
-    for i in range(num_dense_layers):
-        model.add(Dense(dense_units * (2 ** i), activation = 'relu'))
-    model.add(Dense(3, activation = 'softmax'))
-
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003)
-    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
-    return model
 
 
-data_loader = DataLoader()
-mel_spec_png = data_loader.load_mel_spec_png()
-audio_mfcc = data_loader.load_full_data('audio_mfcc', parse_type = 'audio_features')
-audio_mel_spec = data_loader.load_full_data('audio_mel_spec', parse_type = 'audio_features')
+data_loader = ApneaDataLoader()
+audio_mel_spec = data_loader.load_full_data(['audio_mel_spec'], parse_type = 'audio_features')
+tune(mel_spec_cnn, audio_mel_spec, 'mel_spec_cnn_kernel_num_dense', data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH)
 
 
 # tune(mfcc_model_lstm, audio_mfcc, 'audio_mfcc_lstm_changing_lstm_units', data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH)
@@ -341,4 +323,4 @@ audio_mel_spec = data_loader.load_full_data('audio_mel_spec', parse_type = 'audi
 # visualize_hp(mfcc_model_lstm, 'audio_mfcc_lstm_changing_lstm_units')
 # visualize_hp(mfcc_model_bilstm, 'audio_mfcc_bilstm_changing_lstm_units')
 # visualize_hp(mel_spec_cnn, 'audio_mel_spec_cnn_filter_num')
-visualize_hp(mfcc_cnn_model_changing_param, 'audio_mfcc_cnn_filter_num')
+# visualize_hp(mfcc_cnn_model_changing_param, 'audio_mfcc_cnn_filter_num')

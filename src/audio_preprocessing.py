@@ -49,7 +49,7 @@ def make_fname(filename):
 
 os.chdir('/home/hy381/rds/hpc-work/audio_feature_data/')
 data_loader = DataLoader()
-data_files = data_loader.split_train_valid_test()[2]
+data_files = data_loader.split_train_valid_test()[0]
 dataset = tf.data.TFRecordDataset(data_files)
 parsed_dataset = data_loader.parse_audio_feature_tf_record_dataset(dataset, ['audio_mel_spec'], 'train')
 for i, record in enumerate(parsed_dataset): 

@@ -11,9 +11,7 @@
 #SBATCH --gres=gpu:4
 #SBATCH -p ampere
 
-conda init
-conda deactivate
-source /home/hy381/tl_env/bin/activate
+source /home/hy381/model_training/tl_env/bin/activate
 
 module purge
 module load gcc/8

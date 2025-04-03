@@ -4,7 +4,6 @@ from sklearn.utils.class_weight import compute_class_weight
 import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
-# from noisereduce import reduce_noise
 from scipy.signal import butter, sosfiltfilt
 import librosa
 
@@ -12,17 +11,18 @@ data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
 data_labels = pd.read_csv(data_labels_path)
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
+def load_opera_data(): 
+    # returns opera feature train and validation dat
+    opera_feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
+    X_train = np.load(opera_feature_dir + 'train_operaCT_feature.npy')
+    y_train = np.load(opera_feature_dir + "train_labels.npy")
 
-def extract_features(audio): 
-    audio_np = librosa.resample(audio.numpy(), orig_sr = 8000, target_sr = 16000)
-    feature = feature_extractor(audio_np, sampling_rate = 16000)
-    feature = feature['input_values'][0]    
-    feature = base_model(feature)
-    return feature
+    X_valid = np.load(opera_feature_dir + 'valid_operaCT_feature.npy')
+    y_valid = np.load(opera_feature_dir + "valid_labels.npy")
 
-def tf_extract_features(audio): 
-    return tf.py_function(extract_features, [audio], tf.float32)
-
+    train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+    valid_dataset = tf.data.Dataset.from_tensor_slices((X_valid, y_valid))
+    return (X_train, y_train), (X_valid, y_valid)
 
 @tf.function
 def apply_delta(spo2_tensor): 
@@ -80,18 +80,9 @@ def mel_spec(audio):
     spec = tf.numpy_function(mel_spec_wrapper, [audio], tf.float32)
     return spec
 
-def apply_pca(audio):
-    def pca_wrapper(audio_np):
-        pca = PCA(n_components = 100)
-        audio_feature_pca = pca.fit_transform(audio_np.reshape(1, -1))
-        print(audio_feature_pca[0].shape)
-        audio_feature_pca = tf.convert_to_tensor(audio_feature_pca[0], dtype=tf.float32)
-        return audio_feature_pca
-    audio_pca = tf.numpy_function(pca_wrapper, [audio], tf.float32)
-    return audio_pca
-    
-class DataLoader(): 
+class ApneaDataLoader(): 
     def __init__(self, subset_train_count = 8000, subset_test_valid_count = 800, train_batch_size = 128):
+        np.random.seed(42)
         train_files, valid_files, test_files = self.split_train_valid_test()
 
         self.train_batch_size = train_batch_size
@@ -110,7 +101,7 @@ class DataLoader():
         self.VALID_STEPS_PER_EPOCH = self.subset_valid_count//self.train_batch_size -1
 
     def load_full_data(self, features, apply_delta = False, window_spo2 = False, parse_type = 'default'): 
-        full_data = self.prepare_data(features = features, p_train = 0.7, p_valid = 0.15, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type)
+        full_data = self.prepare_data(features = features, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type)
         return full_data
 
     def load_subset_data(self, features, window_spo2 = False, parse_type = 'default'): 
@@ -267,6 +258,67 @@ class DataLoader():
         # test_files = data_labels.loc[data_labels['subject'].isin(test_subjects), 'file'].values
         return train_files, valid_files, test_files
     
+    # def split_train_valid_test(self, p_train = 0.9, p_test = 0.10):
+    #     data_labels_no_mixed = data_labels.loc[data_labels['label'] != 3]
+
+    #     hypopnea_subjects = data_labels_no_mixed[data_labels_no_mixed['label'] == 1].groupby('subject').size().sort_values(ascending = False)
+    #     sorted_hypopnea_subjects = hypopnea_subjects.index.to_list()
+
+    #     def alternate_shuffle_numpy(sorted_arr):
+    #         mid = len(sorted_arr) // 2
+
+    #         # Split into two halves
+    #         small_half = sorted_arr[:mid]         # Smallest half
+    #         large_half = sorted_arr[mid:][::-1]   # Largest half, reversed
+
+    #         # Interleave them
+    #         result = np.column_stack((large_half, small_half)).flatten()
+
+    #         # If odd length, append the last remaining element
+    #         if len(sorted_arr) % 2 != 0:
+    #             result = np.append(result, large_half[-1])
+
+    #         return result
+        
+    #     sorted_hypopnea_subjects = alternate_shuffle_numpy(sorted_hypopnea_subjects)
+    #     all_subjects = np.unique(data_labels_no_mixed['subject'].values)
+    #     p_valid = 0.1
+    #     train_val_subjects, test_subjects = train_test_split(sorted_hypopnea_subjects, test_size = p_test, random_state=42, shuffle = False)
+    #     train_subjects, valid_subjects = train_test_split(train_val_subjects, test_size = p_valid, random_state=42, shuffle = False)
+
+    #     train_subjects_df = data_labels_no_mixed.loc[data_labels_no_mixed['subject'].isin(train_subjects)]
+    #     len_hypopnea = len(train_subjects_df.loc[train_subjects_df['label'] == 1])
+    #     hypopnea_train = train_subjects_df.loc[train_subjects_df['label'] == 1, 'file'].values.astype(str)
+    #     apnea_train = train_subjects_df.loc[train_subjects_df['label'] == 2, 'file'].values.astype(str)
+    #     normal_train = train_subjects_df.loc[train_subjects_df['label'] == 0, 'file'].values.astype(str)
+    
+    #     np.random.seed(42)
+    #     apnea_train, normal_train = np.random.choice(apnea_train, len_hypopnea, replace = False), np.random.choice(normal_train, len_hypopnea, replace = False)
+    #     train_files = np.concatenate([normal_train, apnea_train, hypopnea_train]).astype(str)
+    #     # sampled_train_df = train_subjects_df.groupby('subject', group_keys=False).apply(lambda x : x.sample(frac = 0.5))
+    #     # sampled_train_df = sampled_train_df.reset_index(drop = True)
+
+    #     np.random.seed(42)
+    #     valid_subjects_df = data_labels_no_mixed.loc[data_labels_no_mixed['subject'].isin(valid_subjects)]
+    #     # sampled_valid_df = valid_subjects_df.groupby('subject', group_keys=False).apply(lambda x : x.sample(frac = 0.5))
+    #     # sampled_valid_df = sampled_valid_df.reset_index(drop = True)
+
+    #     np.random.seed(42)
+    #     test_subjects_df = data_labels_no_mixed.loc[data_labels_no_mixed['subject'].isin(test_subjects)]
+    #     # sampled_test_df = test_subjects_df.groupby('subject', group_keys=False).apply(lambda x : x.sample(frac = 0.5))
+    #     # sampled_test_df = sampled_test_df.reset_index(drop = True)
+
+    #     # train_files = sampled_train_df['file'].values.astype(str)
+    #     valid_files = valid_subjects_df['file'].values.astype(str)
+    #     test_files = test_subjects_df['file'].values.astype(str)
+        
+    #     np.random.seed(42)
+    #     train_files, valid_files, test_files = np.random.permutation(train_files), np.random.permutation(valid_files), np.random.permutation(test_files)
+    #     # train_files = data_labels.loc[data_labels['subject'].isin(train_subjects), 'file'].values
+    #     # valid_files = data_labels.loc[data_labels['subject'].isin(valid_subjects), 'file'].values
+    #     # test_files = data_labels.loc[data_labels['subject'].isin(test_subjects), 'file'].values
+    #     return train_files, valid_files, test_files
+    
 
     def split_train_valid_test_subset(self, train_length = 600, valid_length = 60, test_length = 60):
 
@@ -300,7 +352,7 @@ class DataLoader():
                 
         return dataset
 
-    def prepare_data(self, features, subset = False, p_train = 0.7 , p_valid = 0.15, apply_delta = False, window_spo2 = False, parse_type = 'default'):
+    def prepare_data(self, features, subset = False, apply_delta = False, window_spo2 = False, parse_type = 'default'):
         """
         Loads and batches the training, validation, test data and returns the result.
 
@@ -348,7 +400,7 @@ class DataLoader():
             
         train_data_batched = train_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
         valid_data_batched = valid_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
-        test_data_batched = test_dataset.batch(1).prefetch(AUTOTUNE)
+        test_data_batched = test_dataset.batch(1)
         
         return train_data_batched, valid_data_batched, test_data_batched
 
@@ -443,5 +495,5 @@ class DataLoader():
         sample_weights = np.array([class_weight_dict[label] for label in classes])
         sample_weights = tf.convert_to_tensor(sample_weights, tf.float32)
         sample_weights.set_shape([2])
-        return sample_weight
-    
+        return sample_weights
+

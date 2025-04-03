@@ -3,11 +3,11 @@ import numpy as np
 import os
 import pandas as pd
 import json
-from data import DataLoader
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, classification_report
 from tensorflow.keras.models import load_model
+import glob
 
 class Evaluator():
     def __init__(self): 
@@ -15,21 +15,6 @@ class Evaluator():
         gt = np.loadtxt(gt_fname)
         self.gt_labels = np.argmax(gt, axis = 1)
         self.test_count = 3484
-
-    def return_classification_report(self, pred_labels, output_dict = False): 
-        report = classification_report(self.gt_labels, pred_labels, labels = [0, 1, 2], target_names = ['Normal', 'Hypopnea', 'Apnea'], output_dict = output_dict)
-        return report 
-
-    def return_confusion_matrix(self, pred_labels): 
-        cm = confusion_matrix(self.gt_labels, pred_labels)
-        return cm
-    
-    def return_biclass_report(self, pred_labels): 
-        pred_labels_binary = np.where(pred_labels == 0, 0, 1)
-        gt_labels_binary = np.where(self.gt_labels == 0, 0, 1)           
-
-        report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'])
-        return report
 
     def save_cm_png(self, cm, cm_file): 
         labels = ['Normal', 'Hypopnea', 'Apnea']
@@ -74,6 +59,19 @@ class Evaluator():
 
         return predictions
 
+    def find_error_files(model_name):
+        model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
+        predictions_output_file = os.path.join(model_dir, 'predictions.txt')
+        ground_truth_output_file =  os.path.join(model_dir, 'ground_truth.txt')
+
+        preds = np.loadtxt(predictions_output_file)
+        gt = np.loadtxt(ground_truth_output_file)
+
+        pred_labels = np.argmax(preds, axis = 1)
+        gt_labels = np.argmax(gt, axis = 1)
+        diff_indices = np.where(pred_labels != gt_labels)[0]
+    
+
     def save_confusion_matrix(self, model_name, model_dir = None, test_data = None): 
         if model_dir is None: 
             model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
@@ -83,7 +81,7 @@ class Evaluator():
         ground_truth_output_file =  os.path.join(model_dir, 'ground_truth.txt')
     
         if not (os.path.exists(predictions_output_file)): 
-            write_predictions_truths(model_name, test_data)
+            self.write_predictions_truths(model_name, test_data)
 
         preds = np.loadtxt(predictions_output_file)
         gt = np.loadtxt(ground_truth_output_file)
@@ -98,7 +96,7 @@ class Evaluator():
         ax.set_xlabel('Predicted Label', fontsize = 12, fontweight = 'bold', labelpad = 18)
         ax.set_ylabel('True Label', fontsize = 12, fontweight = 'bold', labelpad = 18)
         ax.set_aspect("equal")
-        plt.savefig(f'/home/hy381/model_training/model_results/cm/{model_name}_cm.png', bbox_inches='tight')
+        plt.savefig(f'/home/hy381/model_training/img/cm/{model_name}_cm.png', bbox_inches='tight')
         print(f"Saved confusion matrix for {model_name}")
         return 
 
@@ -109,7 +107,7 @@ class Evaluator():
         predictions_output_file = os.path.join(model_dir, 'predictions.txt')
 
         if not (os.path.exists(predictions_output_file)): 
-            write_predictions_truths(model_name, test_data)
+            self.write_predictions_truths(model_name, test_data)
 
         preds = np.loadtxt(predictions_output_file)
         pred_labels = np.argmax(preds, axis = 1)
@@ -124,6 +122,31 @@ class Evaluator():
             f.write(report)
         return report
 
+    def write_model_binary_report(self, model_name, test_data = None): 
+        model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
+        model_fname = os.path.join(model_dir, f'{model_name}.keras')
+
+        predictions_output_file = os.path.join(model_dir, 'predictions.txt')
+
+        if not (os.path.exists(predictions_output_file)): 
+            self.write_predictions_truths(model_name, test_data)
+
+        preds = np.loadtxt(predictions_output_file)
+        pred_labels = np.argmax(preds, axis = 1)
+
+        ground_truth_output_file =  os.path.join(model_dir, 'ground_truth.txt')
+        gt = np.loadtxt(ground_truth_output_file)
+        gt_labels = np.argmax(gt, axis = 1)
+        
+        pred_labels_binary = np.where(pred_labels == 0, 0, 1)
+        gt_labels_binary = np.where(self.gt_labels == 0, 0, 1)           
+
+        report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'])
+        report_file = f'/home/hy381/model_training/model_results/individual_models/binary_reports/{model_name}.txt'
+        with open(report_file, 'w') as f: 
+            f.write(report)
+        return report
+    
     def plot_model_history(self, model_name): 
         results_file = f'/home/hy381/rds/hpc-work/models/{model_name}/{model_name}.txt'
         with open(results_file, 'r') as file: 
@@ -161,11 +184,11 @@ class Evaluator():
         ax[5].set_xlabel("Epochs")
         ax[5].set_ylabel("Train Recall")
         
-        ax.set_xticklabels(ax.get_xticks(), fontsize=10)
+        # ax.set_xticklabels(ax.get_xticks(), fontsize=10)
         plt.tight_layout()
-        plt.savefig(f'/home/hy381/model_training/model_results/history/{model_name}_history.png')    
+        plt.savefig(f'/home/hy381/model_training/img/history/{model_name}_history.png')    
 
-    def save_biclass_report(self, model_name): 
+    def save_biclass_report(self, model_name, test_data = None): 
         model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
 
         model_fname = os.path.join(model_dir, f'{model_name}.keras')
@@ -173,7 +196,7 @@ class Evaluator():
         ground_truth_output_file =  os.path.join(model_dir, 'ground_truth.txt')
     
         if not (os.path.exists(predictions_output_file)): 
-            write_predictions_truths(model_name, test_data)
+            self.write_predictions_truths(model_name, test_data)
 
         preds = np.loadtxt(predictions_output_file)
         gt = np.loadtxt(ground_truth_output_file)
@@ -185,10 +208,30 @@ class Evaluator():
         gt_labels_binary = np.where(gt_labels == 0, 0, 1)           
 
         report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'])
-        report_file = f'/home/hy381/model_training/model_results/binary_reports/{model_name}.txt'
+        report_file = f'/home/hy381/model_training/model_results/individual_models/binary_reports/{model_name}.txt'
         with open(report_file, 'w') as f: 
             f.write(report)
         return report
+    
+    def find_best_fused_model(self, models, metric): 
+        eval_metrics = []
+        for model in models: 
+            preds = np.loadtxt(f'/home/hy381/rds/hpc-work/models/{model}/predictions.txt')
+            pred_labels = np.argmax(preds, axis = 1)
+            report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypoponea', 'Apnea'], output_dict=True)
+            if metric != 'accuracy': 
+                eval_metrics.append(report['weighted avg'][metric])
+            else: 
+                eval_metrics.append(report[metric])
+        best_indexes = np.argsort(eval_metrics)[::-1]
+        print(eval_metrics)
+        print(best_indexes)
+        models_np = np.array(models)
+        return models_np[best_indexes]
+    
 
-data_loader = DataLoader()
-print(data_loader.full_test_count)
+evaluator = Evaluator()
+fused_models = glob.glob('/home/hy381/rds/hpc-work/models/lf_*')
+fused_model_names = [os.path.basename(f) for f in fused_models]
+best_accs = evaluator.find_best_fused_model(fused_model_names, 'accuracy')
+print(best_accs)

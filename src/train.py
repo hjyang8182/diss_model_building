@@ -3,7 +3,6 @@ import numpy as np
 import os
 import pandas as pd
 import json
-from data import DataLoader
 from tensorflow.keras.models import load_model
 from tensorflow.keras.callbacks import CSVLogger, ReduceLROnPlateau, ModelCheckpoint
 
@@ -14,23 +13,16 @@ def test_model(model_fn, model_data, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOC
     train_data, valid_data, test_data = model_data
     
     model = model_fn()
-    # Make directory to store all output files related to the model
-   
-    # Plot the shape of the model 
     
     # Callbacks for the model 
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 15, restore_best_weights = True)
     
-    # Fit the model 
-    def scheduler(epoch, lr):
-        if epoch % 50 == 0 and epoch > 0:  # Every 30 epochs
-            lr = lr * 0.1  # Decrease by a factor of 10
-        return lr
+    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, verbose=1, epsilon=1e-3, mode='min')
 
     csv_logger = CSVLogger(f'/home/hy381/model_training/src/{model_fn.__name__}.log')
-    scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
+    # scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
-    history = model.fit(train_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [csv_logger, scheduler], validation_steps = VALID_STEPS_PER_EPOCH)
+    history = model.fit(train_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [csv_logger, reduce_lr_loss], validation_steps = VALID_STEPS_PER_EPOCH)
 
     return history
 
@@ -97,9 +89,9 @@ def train_model_full_data(model_fn, model_name, model_data, FULL_TRAIN_STEPS_PER
     
     # Callbacks for the model 
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 5, restore_best_weights = True)
-    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_accuracy', save_best_only=True, mode = "max", verbose =1)
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_loss', save_best_only=True, mode = "min", verbose =1)
     csv_logger = CSVLogger(log_file)
-    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1, epsilon=1e-4, mode='min')
+    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, verbose=1, epsilon=1e-4, mode='min')
 
     # Fit the model 
     history = model.fit(train_data, steps_per_epoch = FULL_TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [checkpoint, csv_logger, reduce_lr_loss], validation_steps = FULL_VALID_STEPS_PER_EPOCH)
@@ -109,7 +101,7 @@ def train_model_full_data(model_fn, model_name, model_data, FULL_TRAIN_STEPS_PER
     
     return history
 
-def load_and_train(model_fn, model_name, model_data, initial_epoch, custom_objects, FULL_TRAIN_STEPS_PER_EPOCH, FULL_VALID_STEPS_PER_EPOCH): 
+def load_and_train(model_fn, model_name, model_data, initial_epoch, custom_objects, FULL_TRAIN_STEPS_PER_EPOCH, FULL_VALID_STEPS_PER_EPOCH, epochs): 
     model_file = os.path.join('/home/hy381/rds/hpc-work/models', model_name, f"{model_name}.keras")
     model = model_fn()
     model = load_model(model_file, custom_objects = custom_objects, safe_mode = False)
@@ -117,13 +109,15 @@ def load_and_train(model_fn, model_name, model_data, initial_epoch, custom_objec
     train_data, valid_data, test_data = model_data
 
     output_file = os.path.join('/home/hy381/rds/hpc-work/models', f"{model_name}.txt")
-    print(output_file)
+    log_file = os.path.join('/home/hy381/rds/hpc-work/models', f"{model_name}.log")
 
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 15, restore_best_weights = True)
-    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file)
-    
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_loss', save_best_only=True, mode = "min", verbose =1)
+    csv_logger = CSVLogger(log_file)
+    reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1, epsilon=1e-5, mode='min')
+
     # Fit the model 
-    history = model.fit(train_data, initial_epoch = initial_epoch, steps_per_epoch = FULL_TRAIN_STEPS_PER_EPOCH, epochs = 50, verbose = 1, validation_data = valid_data, callbacks = [checkpoint], validation_steps = FULL_VALID_STEPS_PER_EPOCH)
+    history = model.fit(train_data, steps_per_epoch = FULL_TRAIN_STEPS_PER_EPOCH, epochs = epochs, verbose = 1, validation_data = valid_data, callbacks = [checkpoint, csv_logger, reduce_lr_loss], validation_steps = FULL_VALID_STEPS_PER_EPOCH)
 
     with open(output_file, 'w') as file: 
         json.dump(history.history, file)# train_model('audio_romero', 'audio_romero_modified', audio_data)

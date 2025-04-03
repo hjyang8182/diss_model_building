@@ -7,12 +7,12 @@ import pandas as pd
 import math
 import tensorflow as tf
 # import data as data
-from data import DataLoader
+from data import ApneaDataLoader
 from noisereduce import reduce_noise
 
 data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
 data_labels = pd.read_csv(data_labels_path)
-os.chdir('/home/hy381/rds/hpc-work/segmented_data_new')
+# os.chdir('/home/hy381/rds/hpc-work/segmented_data_new')
 
 def _float_feature(value): 
     return tf.train.Feature(float_list = tf.train.FloatList(value = value))
@@ -20,7 +20,7 @@ def _float_feature(value):
 def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
 
-data_loader = DataLoader()
+data_loader = ApneaDataLoader()
 
 class Preprocessor: 
     def apply_delta(self, spo2_np): 
@@ -48,7 +48,6 @@ class Preprocessor:
         denoised_audio = reduce_noise(audio_np, sr = 8000)
         mel_spec = librosa.feature.melspectrogram(y = denoised_audio, sr = sr, n_fft = n_fft, hop_length = hop_length)
         log_mel_spec = librosa.power_to_db(mel_spec, ref = np.max)
-        print(log_mel_spec.shape)
         return log_mel_spec
 
     def mel_to_mfcc(self, mel_spectrogram):
@@ -56,7 +55,6 @@ class Preprocessor:
         mfccs = librosa.feature.mfcc(S = mel_spectrogram)  # [batch, time, num_mfcc]
         
         # Keep only the desired number of MFCC coefficients (typically 13 or 20)
-        print(mfccs.shape)
         return mfccs
     
     def _data_example(self, audio_denoised, audio_denoised_mel_spec, audio_denoised_mfcc, audio_mel_spec_shape, audio_mfcc_shape, label): 
@@ -70,16 +68,18 @@ class Preprocessor:
         }
         return tf.train.Example(features = tf.train.Features(feature = feature)).SerializeToString()
 
-    def save_data_tfrecord(self, files, save_dir = '/home/hy381/rds/hpc-work/audio_feature_data'): 
+    def save_data_tfrecord(self, files): 
         dataset = tf.data.TFRecordDataset(files)
-        
         dataset_parsed = data_loader.parse_raw_tf_record_dataset(dataset, ['audio'], dataset_type='train')
+        
+        save_dir = '/home/hy381/rds/hpc-work/audio_feature_data'
         for i, record in enumerate(dataset_parsed): 
             audio, label, _ = record
             file = files[i]
             segment_fpath = os.path.basename(file)
             subject = os.path.dirname(file)
             subject_dir = os.path.join(save_dir, subject)
+            print(save_dir)
             try: 
                 os.makedirs(subject_dir)
             except FileExistsError: 
@@ -89,12 +89,17 @@ class Preprocessor:
             except Exception as e: 
                 print(f"Error: {e} occurred making directory {subject_dir}")
 
+            record_fpath = os.path.join(subject_dir, segment_fpath)
+            if os.path.exists(record_fpath):
+                print(f"{record_fpath} exists - skipping")
+                continue
+            
             label = label.numpy().astype(int)
             # Compute delta metric for spo2
         
             # Compute denoising for audio 
             denoised_audio = self.apply_denoise(audio.numpy())
-
+            print(denoised_audio.shape)
             # Compute mel spectrogram, mfcc for denoised audio 
             mel_spec_audio = self.compute_mel_spec(denoised_audio)
             mfcc_audio = self.mel_to_mfcc(mel_spec_audio)
@@ -105,14 +110,33 @@ class Preprocessor:
 
             data_example = self._data_example(denoised_audio, mel_spec_audio, mfcc_audio, mel_spec_shape, mfcc_shape, label)
 
-            record_fpath = os.path.join(subject_dir, segment_fpath)
             with tf.io.TFRecordWriter(record_fpath) as writer:
                 writer.write(data_example)
             print(f"Feature TFRecord saved for {record_fpath}")
     
 train_files, valid_files, test_files = data_loader.split_train_valid_test()
-processor = Preprocessor()
-# processor.save_data_tfrecord(train_files)
-processor.save_data_tfrecord(valid_files)
-processor.save_data_tfrecord(test_files)
+base_dir = '/home/hy381/rds/hpc-work/audio_feature_data/'
+train_files = np.char.add(base_dir, train_files)
+valid_files = np.char.add(base_dir, valid_files)
+test_files = np.char.add(base_dir, test_files)
+all_files = set(np.concatenate([train_files, valid_files, test_files]))
+all_avail_files = set(glob.glob('/home/hy381/rds/hpc-work/audio_feature_data/*/*.tfrecord'))
+diff = np.array(list(all_files - all_avail_files))
+print(len(all_files))
+print(len(all_avail_files))
+print(len(diff))
+# '/home/hy381/rds/hpc-work/audio_feature_data/1463/1463_segment_187.tfrecord' in diff
+def make_fname(fname): 
+    basename = os.path.basename(fname)
+    subject = basename.split('_')[0]
+    return f"{subject}/{basename}"
+diff = np.vectorize(make_fname)(diff)
+diff = np.char.add('/home/hy381/rds/hpc-work/segmented_data_new/', diff)
+# print(diff)
+# processor = Preprocessor()
+# processor.save_data_tfrecord(diff)
 
+dataset = tf.data.TFRecordDataset(diff)
+dataset_parsed = data_loader.parse_raw_tf_record_dataset(dataset, ['audio'], dataset_type='train')
+for data in  dataset_parsed:
+    print(data)

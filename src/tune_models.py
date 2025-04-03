@@ -16,12 +16,12 @@ import data
 
 def tune(model_fn, data, project_name, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH): 
     train_data, valid_data, test_data = data
-    tuner = kt.Hyperband(model_fn, objective = 'val_accuracy', max_epochs = 50, factor = 2, directory = '/home/hy381/rds/hpc-work/final_model_tuning', project_name = project_name)
+    tuner = kt.Hyperband(model_fn, objective = 'val_loss', max_epochs = 50, factor = 2, directory = '/home/hy381/rds/hpc-work/final_model_tuning', project_name = project_name)
     tuner.search(train_data, epochs = 50, validation_data = valid_data, steps_per_epoch = TRAIN_STEPS_PER_EPOCH, validation_steps = VALID_STEPS_PER_EPOCH)
 
 def visualize_hp(model_fn, project_name): 
     directory = '/home/hy381/rds/hpc-work/final_model_tuning'
-    tuner = kt.Hyperband(model_fn, objective = 'val_accuracy', max_epochs = 50, factor = 2, directory = directory, project_name = project_name)
+    tuner = kt.Hyperband(model_fn, objective = 'val_loss', max_epochs = 50, factor = 2, directory = directory, project_name = project_name)
     
     hp_values = []
     scores = []

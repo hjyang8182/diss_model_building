@@ -5,16 +5,18 @@ import os
 import pandas as pd
 import sys
 from evaluate import Evaluator
-from data import DataLoader
+from data import ApneaDataLoader
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report, multilabel_confusion_matrix
 
 class ModelFuser(): 
     def __init__(self, model, model_type, fusion_method):
-        fusion_methods = {'avg_voting': self.avg_voting, 'weighted_fusion': self.weighted_fusion, 'product_fusion': self.product_rule}
+        fusion_methods = {'avg': self.avg_voting, 'weighted': self.weighted_fusion, 'prod': self.product_rule}
         self.model = model
+        self.method_name = fusion_method
         self.fusion_method = fusion_methods[fusion_method] 
+
 
         self.fusion_dir = '/home/hy381/model_training/model_results/late_fusion/' + fusion_method
         try: 
@@ -33,12 +35,10 @@ class ModelFuser():
         if model_type == 'audio': 
             self.other_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model']
         else: 
-            self.other_models = ['audio_mel_spec_cnn', 'audio_mfcc_cnn', 'audio_mfcc_lstm', 'audio_mfcc_bilstm']
+            self.other_models = ['audio_ms_cnn', 'audio_mfcc_lstm', 'audio_mfcc_cnn']
         # gt_fname = '/home/hy381/rds/hpc-work/models/ground_truth.txt'
         # gt = np.loadtxt(gt_fname)
         # gt_labels = np.argmax(gt, axis = 1)
-        self.all_models = self.other_models
-        self.all_models.append(self.model)
 
     def avg_voting(self, models): 
         all_predictions = []
@@ -92,6 +92,26 @@ class ModelFuser():
         log_product = np.sum(all_predictions, axis = 0)
         return log_product
     
+    def fuse_models(self): 
+        for other_model in self.other_models: 
+            spo2_model_type = self.model.split('_')[1]
+            audio_model_type = other_model.removeprefix('audio_')
+            fused_model_name = f'lf_{self.method_name}_{spo2_model_type}+{audio_model_type}'
+            model_dir = f'/home/hy381/rds/hpc-work/models/{fused_model_name}'
+            try: 
+                os.mkdir(model_dir)
+            except FileExistsError: 
+                print(f"Directory {model_dir} already exists")
+            except PermissionError: 
+                print(f"Permission Denied to create directory {model_dir}")
+            except Exception as e: 
+                print(f"Error: {e} occurred making directory {model_dir}")
+
+            fused_preds = self.fusion_method([self.model, other_model])
+            # pred_labels = np.argmax(fused_preds, axis = 1)
+            pred_fname = os.path.join(model_dir, 'predictions.txt')
+            np.savetxt(pred_fname, fused_preds, fmt = '%f')
+
     def visualize_fusion(self):
         # visualize the model on its own 
         models = []
@@ -99,13 +119,19 @@ class ModelFuser():
         f1_scores = []
         precisions = []
         recalls = []
+        accs = []
         model_dir = f'/home/hy381/rds/hpc-work/models/{self.model}'
+        
         predictions_output_file = os.path.join(model_dir, 'predictions.txt')
         
         preds = np.loadtxt(predictions_output_file)
         pred_labels = np.argmax(preds, axis = 1)
         
         report = evaluator.return_classification_report(pred_labels, output_dict = True)
+        
+        acc = report['accuracy']
+        accs.append(acc)
+
         f1_score = report['weighted avg']['f1-score']
         f1_scores.append(f1_score)
 
@@ -137,6 +163,10 @@ class ModelFuser():
             evaluator.save_report(binary_report, bi_report_file)
             
             report_dict = evaluator.return_classification_report(pred_labels, output_dict = True)
+            
+            acc = report_dict['accuracy']
+            accs.append(acc)
+
             f1_score = report_dict['weighted avg']['f1-score']
             f1_scores.append(f1_score)
 
@@ -155,6 +185,16 @@ class ModelFuser():
             print(f"Permission Denied to create directory {model_result_dir}")
         except Exception as e: 
             print(f"Error: {e} occurred making directory {model_result_dir}")
+
+        plt.figure(figsize = (10, 5))
+        plt.grid(True, zorder=0)
+        sns.barplot(x = models, y = accs)
+        plt.xlabel("Model Combination")
+        plt.ylabel("Accuracy")
+        plt.xticks(multialignment="center", fontsize = 8, rotation = 45)
+        
+        plt.savefig(f'{model_result_dir}/{self.model}_acc', bbox_inches = 'tight')
+        plt.close()
 
         plt.figure(figsize = (10, 5))
         plt.grid(True, zorder=0)
@@ -185,16 +225,18 @@ class ModelFuser():
         plt.close()
      
 evaluator = Evaluator()
-audio_models = ['audio_mel_spec_cnn', 'audio_mfcc_cnn', 'audio_mfcc_lstm', 'audio_mfcc_bilstm']
+audio_models = ['audio_mel_spec_new_denoise', 'audio_mfcc_cnn', 'audio_mfcc_lstm', 'audio_mfcc_bilstm', 'audio_mfcc_new_denoise']
+# audio_models = ['audio_mel_spec_new_denoise']
+
 spo2_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model']
 
-methods = ['avg_voting', 'weighted_fusion', 'product_fusion']
-for method in methods: 
-    for spo2_model in spo2_models: 
-        model_fuser = ModelFuser(spo2_model, 'spo2', method)  
-        model_fuser.visualize_fusion()
+methods = ['avg', 'weighted', 'prod']
 
-    for audio_model in audio_models: 
-        model_fuser = ModelFuser(audio_model, 'audio', method)  
-        model_fuser.visualize_fusion()
+fused_model_names = {}
+for method in methods: 
+    for i in range(len(spo2_models)):
+        spo2_model = spo2_models[i]
+        model_fuser = ModelFuser(spo2_model, 'spo2', method)  
+        model_fuser.fuse_models()
+
 

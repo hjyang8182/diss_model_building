@@ -7,11 +7,11 @@ import os
 import sys
 sys.path.append('/home/hy381/model_training/src')
 import seaborn as sns
-from data import DataLoader
+from data import ApneaDataLoader
 
 os.chdir('/home/hy381/rds/hpc-work/segmented_data_new')
 data_labels = pd.read_csv('data_labels.csv')
-data_loader = DataLoader()
+data_loader = ApneaDataLoader()
 all_files = np.concatenate(list(data_loader.split_train_valid_test()))
 
 from scipy.signal import butter, sosfiltfilt
@@ -67,11 +67,11 @@ def visualize_spo2_audio_stacked(files):
 
         ax[0].plot(spo2)
         ax[0].set_ylabel('SpO2 Signal')
-        ax[0].set_ylim(80, 100)
+        ax[0].set_ylim(60, 100)
         ax[1].set_ylim(0, 1500)
-        fig.suptitle(f"Visualisation for {fname} - {label_names[raw_label]}")
+        # fig.suptitle(f"Visualisation for {fname} - {label_names[raw_label]}")
         mel_spec_display = librosa.display.specshow(spectrogram.numpy(), sr=8000, x_axis="time", y_axis="linear", ax = ax[1],  hop_length=long_hop_length)
-        plt.savefig(f'/home/hy381/model_training/img/data_visualisation/{fname}.png', bbox_inches='tight')
+        plt.savefig(f'/home/hy381/model_training/img/data_visualisation/complimentary/{fname}_{label_names[raw_label]}.png', bbox_inches='tight')
         plt.close()
 
 def visualize_audio_subject(subject): 
@@ -142,7 +142,7 @@ def visualize_spo2_subject(subject):
         ax[i].grid(alpha = 0.5)
         ax[i].plot(spo2)
 
-    fig.suptitle(f"SpO2 Event Visualisation for {subject}", fontsize=12, fontweight='bold')
+    # fig.suptitle(f"SpO2 Event Visualisation for {subject}", fontsize=12, fontweight='bold')
     plt.tight_layout()
     plt.savefig(f'/home/hy381/model_training/img/data_visualisation/audio/{subject}.png', bbox_inches='tight')
 
@@ -152,24 +152,23 @@ def visualize_spo2_subject(subject):
     plt.close()
 
 
-# data_loader = DataLoader()
-# non_apnea_files = data_labels[data_labels['label'] == 0]['file'].values.astype(str)
-# hypopnea_files = data_labels[data_labels['label'] == 1]['file'].values.astype(str)
-# apnea_files = data_labels[data_labels['label'] == 2]['file'].values.astype(str)
+non_apnea_files = data_labels[data_labels['label'] == 0]['file'].values.astype(str)
+hypopnea_files = data_labels[data_labels['label'] == 1]['file'].values.astype(str)
+apnea_files = data_labels[data_labels['label'] == 2]['file'].values.astype(str)
 
-# random_non_apnea_files = np.random.choice(non_apnea_files, 10, replace = False)
-# random_hypopnea_files = np.random.choice(hypopnea_files, 10, replace = False)
-# random_apnea_files = np.random.choice(apnea_files, 10, replace = False)
+random_non_apnea_files = np.random.choice(non_apnea_files, 15, replace = False)
+random_hypopnea_files = np.random.choice(hypopnea_files, 15, replace = False)
+random_apnea_files = np.random.choice(apnea_files, 15, replace = False)
 
-# visualize_spo2_audio_stacked(random_non_apnea_files)
-# visualize_spo2_audio_stacked(random_apnea_files)
-# visualize_spo2_audio_stacked(random_hypopnea_files)
+visualize_spo2_audio_stacked(random_non_apnea_files)
+visualize_spo2_audio_stacked(random_apnea_files)
+visualize_spo2_audio_stacked(random_hypopnea_files)
 
-subjects = data_labels['subject'].values
-random_subjects = np.random.choice(subjects, 30, replace = False)
-# for subject in random_subjects: 
-#     visualize_spo2_subject(subject)
+# subjects = data_labels['subject'].values
+# random_subjects = np.random.choice(subjects, 30, replace = False)
+# # for subject in random_subjects: 
+# #     visualize_spo2_subject(subject)
 
-for subject in random_subjects:
-    visualize_audio_subject(subject)
-    print(subject)
+# for subject in random_subjects:
+#     visualize_audio_subject(subject)
+#     print(subject)
