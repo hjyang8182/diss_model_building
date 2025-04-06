@@ -5,9 +5,12 @@ import librosa
 import pandas as pd
 import os
 import sys
+from tensorflow.keras.models import load_model
+
 sys.path.append('/home/hy381/model_training/src')
 import seaborn as sns
 from data import ApneaDataLoader
+import visualkeras
 
 os.chdir('/home/hy381/rds/hpc-work/segmented_data_new')
 data_labels = pd.read_csv('data_labels.csv')
@@ -39,7 +42,8 @@ def _butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = sosfiltfilt(sos, data)
     return y
 
-def visualize_spo2_audio_stacked(files): 
+def visualize_spo2_audio_stacked(files, save_fname):
+    
     dataset = tf.data.Dataset.from_tensor_slices(files)
 
     dataset = dataset.interleave(
@@ -71,7 +75,9 @@ def visualize_spo2_audio_stacked(files):
         ax[1].set_ylim(0, 1500)
         # fig.suptitle(f"Visualisation for {fname} - {label_names[raw_label]}")
         mel_spec_display = librosa.display.specshow(spectrogram.numpy(), sr=8000, x_axis="time", y_axis="linear", ax = ax[1],  hop_length=long_hop_length)
-        plt.savefig(f'/home/hy381/model_training/img/data_visualisation/complimentary/{fname}_{label_names[raw_label]}.png', bbox_inches='tight')
+        if save_fname is None: 
+            save_fname = f'/home/hy381/model_training/img/data_visualisation/complimentary/{fname}_{label_names[raw_label]}.png'
+        plt.savefig(save_fname, bbox_inches='tight')
         plt.close()
 
 def visualize_audio_subject(subject): 
@@ -151,24 +157,43 @@ def visualize_spo2_subject(subject):
     plt.show()
     plt.close()
 
+# def visualize_opera_spectrogram(): 
+#     wav2vec_feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
 
-non_apnea_files = data_labels[data_labels['label'] == 0]['file'].values.astype(str)
-hypopnea_files = data_labels[data_labels['label'] == 1]['file'].values.astype(str)
-apnea_files = data_labels[data_labels['label'] == 2]['file'].values.astype(str)
+#     train_features = np.load(wav2vec_feature_dir + 'train_spectrogram.npy')
+#     for feature in train_features: 
+#         mel_spec_display = librosa.display.specshow(feature, sr=8000, x_axis="time", y_axis="linear", ax = ax[i],  hop_length=long_hop_length)
 
-random_non_apnea_files = np.random.choice(non_apnea_files, 15, replace = False)
-random_hypopnea_files = np.random.choice(hypopnea_files, 15, replace = False)
-random_apnea_files = np.random.choice(apnea_files, 15, replace = False)
+def main(): 
+    models_dir = '/home/hy381/rds/hpc-work/models'
+    all_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model', 'audio_ms_cnn', 'audio_mfcc_lstm', 'audio_mfcc_cnn', 'audio_ms_new']
+    for model_name in all_models: 
+        model_fpath = os.path.join(models_dir, model_name, f'{model_name}.keras')
+        print(model_fpath)
+        model = load_model(model_fpath)
+        visualkeras.layered_view(model, to_file=f'/home/hy381/model_training/img/models/{model_name}.png', legend = True, padding = 10, max_xy = 800)
 
-visualize_spo2_audio_stacked(random_non_apnea_files)
-visualize_spo2_audio_stacked(random_apnea_files)
-visualize_spo2_audio_stacked(random_hypopnea_files)
 
-# subjects = data_labels['subject'].values
-# random_subjects = np.random.choice(subjects, 30, replace = False)
-# # for subject in random_subjects: 
-# #     visualize_spo2_subject(subject)
+    # non_apnea_files = data_labels[data_labels['label'] == 0]['file'].values.astype(str)
+    # hypopnea_files = data_labels[data_labels['label'] == 1]['file'].values.astype(str)
+    # apnea_files = data_labels[data_labels['label'] == 2]['file'].values.astype(str)
 
-# for subject in random_subjects:
-#     visualize_audio_subject(subject)
-#     print(subject)
+    # random_non_apnea_files = np.random.choice(non_apnea_files, 15, replace = False)
+    # random_hypopnea_files = np.random.choice(hypopnea_files, 15, replace = False)
+    # random_apnea_files = np.random.choice(apnea_files, 15, replace = False)
+
+    # visualize_spo2_audio_stacked(random_non_apnea_files)
+    # visualize_spo2_audio_stacked(random_apnea_files)
+    # visualize_spo2_audio_stacked(random_hypopnea_files)
+
+    # subjects = data_labels['subject'].values
+    # random_subjects = np.random.choice(subjects, 30, replace = False)
+    # # for subject in random_subjects: 
+    # #     visualize_spo2_subject(subject)
+
+    # for subject in random_subjects:
+    #     visualize_audio_subject(subject)
+    #     print(subject)
+
+if __name__ == '__main__':
+    main()

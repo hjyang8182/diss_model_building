@@ -13,10 +13,14 @@ from sklearn.metrics import confusion_matrix, classification_report, multilabel_
 class ModelFuser(): 
     def __init__(self, model, model_type, fusion_method):
         fusion_methods = {'avg': self.avg_voting, 'weighted': self.weighted_fusion, 'prod': self.product_rule}
+        
         self.model = model
         self.method_name = fusion_method
         self.fusion_method = fusion_methods[fusion_method] 
 
+        gt_fname = '/home/hy381/rds/hpc-work/models/ground_truth.txt'
+        gt = np.loadtxt(gt_fname)
+        self.gt_labels = np.argmax(gt, axis = 1)
 
         self.fusion_dir = '/home/hy381/model_training/model_results/late_fusion/' + fusion_method
         try: 
@@ -35,7 +39,7 @@ class ModelFuser():
         if model_type == 'audio': 
             self.other_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model']
         else: 
-            self.other_models = ['audio_ms_cnn', 'audio_mfcc_lstm', 'audio_mfcc_cnn']
+            self.other_models = ['audio_ms_cnn', 'audio_mfcc_lstm', 'audio_mfcc_cnn', 'audio_ms_new']
         # gt_fname = '/home/hy381/rds/hpc-work/models/ground_truth.txt'
         # gt = np.loadtxt(gt_fname)
         # gt_labels = np.argmax(gt, axis = 1)
@@ -78,6 +82,25 @@ class ModelFuser():
             weighted_preds = preds * weights
             all_predictions.append(weighted_preds)
         mean_preds = np.mean(all_predictions, axis = 0)
+        return mean_preds
+
+    def naive_bayes(self, models):
+        all_predictions = []
+        for model_name in models:
+            model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
+            model_fname = os.path.join(model_dir, f'{model_name}.keras')
+
+            predictions_output_file = os.path.join(model_dir, 'predictions.txt')
+            preds = np.loadtxt(predictions_output_file)
+            pred_labels = np.argmax(preds, axis = 1)
+
+            gt_file = os.path.join(model_dir, 'ground_truth.txt')
+            gts = np.loadtxt(gt_file)
+            gt_labels = np.argmax(gts, axis = 1)
+
+            mcm = confusion_matrix(gt_labels, pred_labels, labels = [0, 1, 2])
+            weights = []
+            
         return mean_preds
 
     def product_rule(self, models):
@@ -127,7 +150,7 @@ class ModelFuser():
         preds = np.loadtxt(predictions_output_file)
         pred_labels = np.argmax(preds, axis = 1)
         
-        report = evaluator.return_classification_report(pred_labels, output_dict = True)
+        report = classification_report(self.gt_labels, pred_labels, output_dict = True)
         
         acc = report['accuracy']
         accs.append(acc)
@@ -151,18 +174,19 @@ class ModelFuser():
             model_name = f'{self.model}+{other_model}'
 
             cm_file = os.path.join(self.fusion_dir, 'cm', f"{model_name}_cm.png")
-            cm = evaluator.return_confusion_matrix(pred_labels)
+            cm = confusion_matrix(self.gt_labels, pred_labels)
             evaluator.save_cm_png(cm, cm_file)
 
             report_file = os.path.join(self.fusion_dir, 'reports', f"{model_name}_report.txt")
-            report = evaluator.return_classification_report(pred_labels)
+            report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'])
             evaluator.save_report(report, report_file)
 
             bi_report_file = os.path.join(self.fusion_dir, 'binary_reports', f"{model_name}_report.txt")
             binary_report = evaluator.return_biclass_report(pred_labels)
             evaluator.save_report(binary_report, bi_report_file)
             
-            report_dict = evaluator.return_classification_report(pred_labels, output_dict = True)
+            report_dict = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'], output_dict=True)
+
             
             acc = report_dict['accuracy']
             accs.append(acc)
@@ -224,19 +248,22 @@ class ModelFuser():
         plt.savefig(f'{model_result_dir}/{self.model}_recall', bbox_inches = 'tight')
         plt.close()
      
+def main(): 
+    pass
+
+if __name__ == '__main__':
+    main()
 evaluator = Evaluator()
-audio_models = ['audio_mel_spec_new_denoise', 'audio_mfcc_cnn', 'audio_mfcc_lstm', 'audio_mfcc_bilstm', 'audio_mfcc_new_denoise']
-# audio_models = ['audio_mel_spec_new_denoise']
 
 spo2_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model']
 
 methods = ['avg', 'weighted', 'prod']
 
-fused_model_names = {}
-for method in methods: 
-    for i in range(len(spo2_models)):
-        spo2_model = spo2_models[i]
-        model_fuser = ModelFuser(spo2_model, 'spo2', method)  
-        model_fuser.fuse_models()
+# fused_model_names = {}
+# for method in methods: 
+#     for i in range(len(spo2_models)):
+#         spo2_model = spo2_models[i]
+#         model_fuser = ModelFuser(spo2_model, 'spo2', method)  
+#         model_fuser.visualize_fusion()
 
 

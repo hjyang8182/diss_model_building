@@ -11,21 +11,9 @@ data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
 data_labels = pd.read_csv(data_labels_path)
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
-def load_opera_data(): 
-    # returns opera feature train and validation dat
-    opera_feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
-    X_train = np.load(opera_feature_dir + 'train_operaCT_feature.npy')
-    y_train = np.load(opera_feature_dir + "train_labels.npy")
-
-    X_valid = np.load(opera_feature_dir + 'valid_operaCT_feature.npy')
-    y_valid = np.load(opera_feature_dir + "valid_labels.npy")
-
-    train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-    valid_dataset = tf.data.Dataset.from_tensor_slices((X_valid, y_valid))
-    return (X_train, y_train), (X_valid, y_valid)
 
 @tf.function
-def apply_delta(spo2_tensor): 
+def apply_delta_fn(spo2_tensor): 
     # spo2_np = spo2_tensor.numpy()
     threshold = 10
     delta_spo2 = []
@@ -100,8 +88,8 @@ class ApneaDataLoader():
         self.TRAIN_STEPS_PER_EPOCH = self.subset_train_count//self.train_batch_size
         self.VALID_STEPS_PER_EPOCH = self.subset_valid_count//self.train_batch_size -1
 
-    def load_full_data(self, features, apply_delta = False, window_spo2 = False, parse_type = 'default'): 
-        full_data = self.prepare_data(features = features, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type)
+    def load_full_data(self, features, apply_delta = False, window_spo2 = False, parse_type = 'default', batch = True): 
+        full_data = self.prepare_data(features = features, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type, batch = batch)
         return full_data
 
     def load_subset_data(self, features, window_spo2 = False, parse_type = 'default'): 
@@ -136,7 +124,7 @@ class ApneaDataLoader():
             if 'spo2' in features: 
                 spo2 = parsed_features['spo2']
                 if apply_delta: 
-                    spo2 = apply_delta(spo2)
+                    spo2 = apply_delta_fn(spo2)
                     if window_spo2: 
                         windowed_spo2 = apply_window(spo2)
                         parsed_features['spo2'] = windowed_spo2
@@ -349,10 +337,9 @@ class ApneaDataLoader():
             dataset = self.parse_raw_tf_record_dataset(dataset, features, dataset_type=dataset_type, apply_delta = apply_delta,  window_spo2=window_spo2)
         else: 
             dataset = self.parse_audio_feature_tf_record_dataset(dataset, features, dataset_type=dataset_type)
-                
         return dataset
 
-    def prepare_data(self, features, subset = False, apply_delta = False, window_spo2 = False, parse_type = 'default'):
+    def prepare_data(self, features, subset = False, apply_delta = False, window_spo2 = False, parse_type = 'default', batch = True):
         """
         Loads and batches the training, validation, test data and returns the result.
 
@@ -397,13 +384,36 @@ class ApneaDataLoader():
             train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', window_spo2 = window_spo2)
             valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', window_spo2 = window_spo2)
             test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', window_spo2 = window_spo2)
-            
+        
+        if batch: 
+            train_data_batched = train_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
+            valid_data_batched = valid_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
+            test_data_batched = test_dataset.batch(1)
+            return train_data_batched, valid_data_batched, test_data_batched
+
+        return train_dataset, valid_dataset, test_dataset
+
+    def load_opera_data(self): 
+        # returns opera feature train and validation dat
+        opera_feature_dir = '/home/hy381/rds/hpc-work/opera_features_old/'
+        X_train = np.load(opera_feature_dir + 'train_operaCT_feature.npy')
+        y_train = np.load(opera_feature_dir + "train_labels.npy")
+
+        X_valid = np.load(opera_feature_dir + 'valid_operaCT_feature.npy')
+        y_valid = np.load(opera_feature_dir + "valid_labels.npy")
+
+        X_test = np.load(opera_feature_dir + 'test_operaCT_feature.npy')
+        y_test = np.load(opera_feature_dir + "test_labels.npy")
+
+        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+        valid_dataset = tf.data.Dataset.from_tensor_slices((X_valid, y_valid))
+        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
         train_data_batched = train_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
         valid_data_batched = valid_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
-        test_data_batched = test_dataset.batch(1)
-        
+        test_data_batched = test_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
         return train_data_batched, valid_data_batched, test_data_batched
-
+        
     def load_mel_spec_images(self, subset = False):
         if subset: 
             train_files, valid_files, test_files = self.split_train_valid_test_subset(self.subset_train_count, self.subset_valid_count, self.subset_test_count)

@@ -17,43 +17,6 @@ import data
 
 
 # Tune complete
-def mfcc_cnn_model(hp): 
-    model = tf.keras.models.Sequential()
-    # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    model.add(InputLayer(input_shape = (20,1251), dtype = 'float32'))
-    model.add(Reshape((20, -1, 1)))
-
-    num_filters =hp.Choice(f'num_filters', [16, 32, 64, 128])
-    # kernel_size= hp.Int(f'kernel_size', min_value = 2, max_value = 4)
-    # num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
-
-    # tuned
-    num_filters = 16
-    kernel_size = 2
-    num_layers = 2
-
-    
-    for i in range(num_layers):
-        model.add(Conv2D(
-            num_filters,
-            kernel_size=(kernel_size, kernel_size),
-            activation='relu', 
-        ))
-        model.add(BatchNormalization())
-        model.add(MaxPool2D((2,2)))
-
-    model.add(GlobalAveragePooling2D())
-    num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
-    dense_units = hp.Choice(f'dense_units', [16, 64, 128, 256, 512])
-    for i in range(num_dense_layers): 
-        model.add(Dense(dense_units, activation = 'relu'))
-    model.add(Dense(3, activation = 'softmax'))
-
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003, clipnorm = 1.0)
-    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
-    model.summary()
-    return model
-
 def mfcc_model_bilstm(hp):
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
@@ -224,39 +187,46 @@ def mfcc_model_lstm_changing_units(hp):
     model.summary()
     return model 
 
-def mfcc_cnn_model_changing_param(hp): 
+def mfcc_cnn_model(hp): 
+    num_filters = hp.Choice(f'num_filters', [16, 32, 64, 128])
+    dense_units = hp.Choice(f'dense_units', [16, 32, 64, 128, 256, 512])
+    num_dense_layers = hp.Int('dense_layers', min_value = 1, max_value = 4, step = 1)
+
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
-    model.add(InputLayer(input_shape = (20,1251), dtype = 'float32'))
+    model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
     model.add(Reshape((20, -1, 1)))
 
-    num_filters = hp.Choice(f'num_filters', [16, 32, 64, 128])
-    # kernel_size= hp.Int(f'kernel_size', min_value = 2, max_value = 4)
-    num_layers = hp.Int('num_layers', min_value = 1, max_value = 4, step = 1)
-    # num_same_layers = hp.Int('num_same_layers', min_value = 1, max_value = 4, step = 1)
-    # tuned
-    kernel_size = 2
-    
-    for i in range(num_layers): 
-        model.add(Conv2D(num_filters * 2 ** i, (2, 3), strides = (1,2), activation = 'relu', padding = 'same'))
-        model.add(BatchNormalization())
-        model.add(MaxPool2D((2,2)))
-        model.add(Dropout(0.1))
+    model.add(Conv2D(num_filters, (2, 7), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 3)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (2, 8), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 3)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (3, 9), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (3, 10), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 5)))
+    model.add(Dropout(0.3))
 
     model.add(Flatten())
-    # num_dense_layers = hp.Int('num_dense_layers', min_value = 0, max_value = 4, step = 1)
-    dense_units = hp.Choice(f'dense_units', [16, 32, 64, 128, 256, 512])
-    # for i in range(num_dense_layers): 
-    #     model.add(Dense(dense_units * (2**i), activation = 'relu'))
-
-    model.add(Dense(dense_units, activation = 'relu'))
+    for i in range(num_dense_layers):
+        model.add(Dense(dense_units, activation = 'relu', kernel_regularizer = l1(0.0001)))
     model.add(Dense(3, activation = 'softmax'))
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate = 0.0003, clipnorm = 1.0)
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     model.summary()
     return model
-
+#
 def mel_spec_cnn(hp): 
     num_filters = hp.Choice(f'num_filters', [16, 32, 64, 128])
     # kernel_size= hp.Int(f'kernel_size', min_value = 2, max_value = 4)
@@ -310,6 +280,9 @@ def mel_spec_cnn(hp):
 
 data_loader = ApneaDataLoader()
 audio_mel_spec = data_loader.load_full_data(['audio_mel_spec'], parse_type = 'audio_features')
+audio_mfcc = data_loader.load_full_data(['audio_mfcc'], parse_type = 'audio_features')
+
+tune(mfcc_cnn_model, audio_mfcc, 'mfcc_cnn_kernel_num_dense', data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH)
 tune(mel_spec_cnn, audio_mel_spec, 'mel_spec_cnn_kernel_num_dense', data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH)
 
 
@@ -323,4 +296,4 @@ tune(mel_spec_cnn, audio_mel_spec, 'mel_spec_cnn_kernel_num_dense', data_loader.
 # visualize_hp(mfcc_model_lstm, 'audio_mfcc_lstm_changing_lstm_units')
 # visualize_hp(mfcc_model_bilstm, 'audio_mfcc_bilstm_changing_lstm_units')
 # visualize_hp(mel_spec_cnn, 'audio_mel_spec_cnn_filter_num')
-# visualize_hp(mfcc_cnn_model_changing_param, 'audio_mfcc_cnn_filter_num')
+visualize_hp(mel_spec_cnn, 'mel_spec_cnn_kernel_num_dense')

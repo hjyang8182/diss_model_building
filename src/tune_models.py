@@ -12,8 +12,6 @@ script_dir = os.getcwd()
 sys.path.append(script_dir)
 import data
 
-
-
 def tune(model_fn, data, project_name, TRAIN_STEPS_PER_EPOCH, VALID_STEPS_PER_EPOCH): 
     train_data, valid_data, test_data = data
     tuner = kt.Hyperband(model_fn, objective = 'val_loss', max_epochs = 50, factor = 2, directory = '/home/hy381/rds/hpc-work/final_model_tuning', project_name = project_name)
@@ -33,7 +31,7 @@ def visualize_hp(model_fn, project_name):
             # scores.append(trial.score)
             trials.append(trial)
     # trials = tuner.oracle.get_best_trials(5)
-    sorted_trials = sorted(trials, key=lambda t: t.score, reverse=True)  # Reverse if accuracy-based
+    sorted_trials = sorted(trials, key=lambda t: t.score)  # Reverse if accuracy-based
     sorted_hp_values = [trial.hyperparameters.values for trial in sorted_trials]
     sorted_scores = [trial.score for trial in sorted_trials]
 

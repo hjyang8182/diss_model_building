@@ -14,7 +14,7 @@ from torch.optim import AdamW
 import torch.multiprocessing as mp
 import glob 
 import pandas as pd
-# from data import ApneaDataLoader
+from data import ApneaDataLoader
 # use tl_env 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 sys.path.insert(0, '/home/hy381/rds/hpc-work/OPERA')
@@ -33,19 +33,20 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # train_files, valid_files, test_files = np.vectorize(os.path.basename)(train_files), np.vectorize(os.path.basename)(valid_files), np.vectorize(os.path.basename)(test_files)
 # train_files, valid_files, test_files = np.char.replace(train_files, '.tfrecord', '.wav'), np.char.replace(valid_files, '.tfrecord', '.wav'), np.char.replace(test_files, '.tfrecord', '.wav')
 
-# def save_opera_features(): 
-#     os.chdir('/home/hy381/rds/hpc-work/audio_wav')
-#     data_loader = ApneaDataLoader()
-#     train_files, valid_files, test_files = data_loader.split_train_valid_test()
-#     train_files, valid_files, test_files = np.vectorize(os.path.basename)(train_files), np.vectorize(os.path.basename)(valid_files), np.vectorize(os.path.basename)(test_files)
-#     train_files, valid_files, test_files = np.char.replace(train_files, '.tfrecord', '.wav'), np.char.replace(valid_files, '.tfrecord', '.wav'), np.char.replace(test_files, '.tfrecord', '.wav')
-#     all_files = [train_files, valid_files, test_files]
-#     data_type = ['train', 'valid', 'test']
-#     for i in range(3): 
-#         files = all_files[i]
-#         feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
-#         # opera_features = extract_opera_feature(files,  pretrain="operaCT", input_sec=40, dim=768)
-#         # np.save(feature_dir + f"{data_type[i]}_operaCT_feature.npy", np.array(opera_features))
+def save_opera_features(): 
+    os.chdir('/home/hy381/rds/hpc-work/audio_wav')
+    data_loader = ApneaDataLoader()
+    train_files, valid_files, test_files = data_loader.split_train_valid_test()
+    train_files, valid_files, test_files = np.vectorize(os.path.basename)(train_files), np.vectorize(os.path.basename)(valid_files), np.vectorize(os.path.basename)(test_files)
+    train_files, valid_files, test_files = np.char.replace(train_files, '.tfrecord', '.wav'), np.char.replace(valid_files, '.tfrecord', '.wav'), np.char.replace(test_files, '.tfrecord', '.wav')
+    all_files = [train_files, valid_files, test_files]
+    data_type = ['train', 'valid', 'test']
+    for i in range(3): 
+        files = all_files[i]
+        print(len(files))
+        feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
+        opera_features = extract_opera_feature(files,  pretrain="operaCT", input_sec=40, dim=768)
+        # np.save(feature_dir + f"{data_type[i]}_operaCT_feature.npy", np.array(opera_features))
 #         from src.util import get_split_signal_librosa
 #         x_data = []
 #         for audio_file in files:
@@ -56,17 +57,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 #         x_data = np.array(x_data)
 #         np.save(feature_dir + f"{data_type[i]}_spectrogram.npy", x_data)
 # save_opera_features()
-# data_loader = ApneaDataLoader(subset_train_count=9000, subset_test_valid_count=900)
+# data_loader = ApneaDataLoader()
 # train_files, valid_files, test_files = data_loader.split_train_valid_test()
-# data_labels_path = '/home/hy381/rds/hpc-work/segmented_data_new/data_labels.csv'
-# data_labels = pd.read_csv(data_labels_path)
-# train_labels = data_labels.loc[data_labels['file'].isin(train_files), 'label'].values
-# valid_labels = data_labels.loc[data_labels['file'].isin(valid_files), 'label'].values
-# test_labels = data_labels.loc[data_labels['file'].isin(test_files), 'label'].values
-# feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
-# np.save(feature_dir + f"train_labels.npy", np.array(train_labels))
-# np.save(feature_dir + f"valid_labels.npy", np.array(valid_labels))
-# np.save(feature_dir + f"test_labels.npy", np.array(test_labels))
 
 class CNNClassifier(nn.Module):
     def __init__(self, input_dim=768, output_dim=3):
@@ -165,22 +157,29 @@ def main():
 
 
     net = pretrained_model.encoder
-    model = AudioClassifier(net=net, head="linear", classes=3, feat_dim=768, freeze_encoder="none")
+    
+    # add fully connected layers
+
+    class CustomHead(nn.Module):
+        def __init__(self, input_dim, num_classes):
+            super(CustomHead, self).__init__()
+            self.fc_layers = nn.Sequential(
+                nn.Linear(input_dim, 512),
+                nn.ReLU(),
+                nn.Linear(512, 256),
+                nn.ReLU(),
+                nn.Linear(256, num_classes)  # Final layer for classification
+            )
+
+        def forward(self, x):
+            return self.fc_layers(x)
+
+    model = AudioClassifier(net=net, head='mlp', classes=3, freeze_encoder="none")
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
 
     wav2vec_feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
-
-    # train_features = np.load(wav2vec_feature_dir + 'train_operaCT_feature.npy')
-    # train_labels = np.load(wav2vec_feature_dir + 'train_labels.npy')
-
-    # valid_features = np.load(wav2vec_feature_dir + 'valid_operaCT_feature.npy')
-    # valid_labels = np.load(wav2vec_feature_dir + 'valid_labels.npy')
-
-    # test_features = np.load(wav2vec_feature_dir + 'test_operaCT_feature.npy')
-    # test_labels = np.load(wav2vec_feature_dir + 'test_labels.npy')
-
 
     train_features = np.load(wav2vec_feature_dir + 'train_spectrogram.npy')
     train_labels = np.load(wav2vec_feature_dir + 'train_labels.npy')
