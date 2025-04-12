@@ -114,6 +114,52 @@ class Preprocessor:
                 writer.write(data_example)
             print(f"Feature TFRecord saved for {record_fpath}")
     
+    def save_data_tfrecord(self, files): 
+        dataset = tf.data.TFRecordDataset(files)
+        dataset_parsed = data_loader.parse_audio_feature_tf_record_dataset(dataset, ['audio_denoised'], dataset_type='train')
+        
+        save_dir = '/home/hy381/rds/hpc-work/mfcc_ms_data'
+        for i, record in enumerate(dataset_parsed): 
+            denoised_audio, label, _ = record
+            file = files[i]
+            segment_fpath = os.path.basename(file)
+            subject = os.path.dirname(file)
+            subject_dir = os.path.join(save_dir, subject)
+            print(save_dir)
+            try: 
+                os.makedirs(subject_dir)
+            except FileExistsError: 
+                print(f"Directory {subject_dir} already exists")
+            except PermissionError: 
+                print(f"Permission Denied to create directory {subject_dir}")
+            except Exception as e: 
+                print(f"Error: {e} occurred making directory {subject_dir}")
+
+            record_fpath = os.path.join(subject_dir, segment_fpath)
+
+            mel_spec_audio = self.compute_mel_spec(denoised_audio)
+            mfcc_audio = self.mel_to_mfcc(mel_spec_audio)
+            
+            
+            label = label.numpy().astype(int)
+            # Compute delta metric for spo2
+        
+            # Compute denoising for audio 
+            denoised_audio = self.apply_denoise(audio.numpy())
+            print(denoised_audio.shape)
+            # Compute mel spectrogram, mfcc for denoised audio 
+            mel_spec_audio = self.compute_mel_spec(denoised_audio)
+            mfcc_audio = self.mel_to_mfcc(mel_spec_audio)
+
+            # keep track of dimensions of mel spec, mfcc audio 
+            mel_spec_shape = mel_spec_audio.shape
+            mfcc_shape = mfcc_audio.shape
+
+            data_example = self._data_example(denoised_audio, mel_spec_audio, mfcc_audio, mel_spec_shape, mfcc_shape, label)
+
+            with tf.io.TFRecordWriter(record_fpath) as writer:
+                writer.write(data_example)
+            print(f"Feature TFRecord saved for {record_fpath}")
 train_files, valid_files, test_files = data_loader.split_train_valid_test()
 base_dir = '/home/hy381/rds/hpc-work/audio_feature_data/'
 train_files = np.char.add(base_dir, train_files)

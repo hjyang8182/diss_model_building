@@ -11,11 +11,12 @@
 #SBATCH --gres=gpu:4
 #SBATCH -p ampere
 
-source /home/hy381/model_training/tl_env/bin/activate
-
 module purge
 module load gcc/8
 module load rhel8/default-gpu
 module unload cuda/8.0
 module load cuda/12.1  
+
+source /home/hy381/model_training/tl_env/bin/activate
+
 python "$1"

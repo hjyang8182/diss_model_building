@@ -17,6 +17,5 @@ module load rhel8/default-gpu
 module unload cuda/8.0
 module load cuda/12.1  
 
-conda init
 source /home/hy381/model_training/tf_env/bin/activate
 python "$1"

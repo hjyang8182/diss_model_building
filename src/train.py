@@ -89,7 +89,7 @@ def train_model_full_data(model_fn, model_name, model_data, FULL_TRAIN_STEPS_PER
     
     # Callbacks for the model 
     # early_stopping = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 5, restore_best_weights = True)
-    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_loss', save_best_only=True, mode = "min", verbose =1)
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(model_file, monitor = 'val_accuracy', save_best_only=True, mode = "max", verbose =1)
     csv_logger = CSVLogger(log_file)
     reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, verbose=1, epsilon=1e-4, mode='min')
 

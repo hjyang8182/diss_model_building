@@ -1,48 +1,18 @@
 from data import ApneaDataLoader
 import tensorflow as tf
 import numpy as np
+import sys
 import librosa
 from soundfile import SoundFile
 import os
+sys.path.insert(0, '/home/hy381/rds/hpc-work/OPERA')
 
-
-
-
-# dataset = tf.data.Dataset.from_tensor_slices(train_files[:10])
-# dataset = dataset.interleave(
-#             lambda filename: tf.data.TFRecordDataset(filename, buffer_size=1000000),
-#             cycle_length=4,  # Number of files read in parallel
-#             num_parallel_calls=tf.data.experimental.AUTOTUNE  # Optimize for performance
-#         )
-# dataset = data_loader.parse_raw_tf_record_dataset(dataset, ['audio'], dataset_type='train')
-# save_dir = '/home/hy381/rds/hpc-work/audio/'
-# audio_list = []
-# label_list = []
-# fnames_list = []
-# for i, data in enumerate(dataset):
-#     audio, label, _ = data
-#     fname = valid_files[i]
-#     audio_np = audio.numpy()
-#     label_np = label.numpy()
-#     audio_list.append(audio_np)
-#     label_list.append(label_np)
-#     fnames_list.append(fname)
-#     print(f"Audio Files saved fr {fname}")
-# audio_array = np.array(audio_list)
-# label_array = np.array(label_list)
-# fname_array = np.array(fnames_list)
-# assert(audio_array.shape[0] == len(valid_files))
-
-# # Save the NumPy arrays
-# np.save(f"{save_dir}/valid_audio_data.npy", audio_array)
-# np.save(f"{save_dir}/valid_labels.npy", label_array)
-# np.save(f"{save_dir}/valid_files.npy", fname_array)
+from src.benchmark.model_util import extract_opera_feature
 
 def save_og_audio(): 
     data_loader = ApneaDataLoader()
-    train_files, valid_files, test_files = data_loader.split_train_valid_test_subset(train_length = 8000, valid_length = 1000, test_length = 1000)
+    train_files, valid_files, test_files = data_loader.split_train_valid_test()
     base_dir = '/home/hy381/rds/hpc-work/segmented_data_new/'
-    base_dir = '/home/hy381/rds/hpc-work/audio_feature_data/'
     train_files = np.char.add(base_dir, train_files)
     valid_files = np.char.add(base_dir, valid_files)
     test_files = np.char.add(base_dir, test_files)
@@ -59,7 +29,7 @@ def save_og_audio():
                     num_parallel_calls=tf.data.experimental.AUTOTUNE  # Optimize for performance
                 )
         dataset = data_loader.parse_raw_tf_record_dataset(dataset, ['audio'], dataset_type='train')
-        save_dir = '/home/hy381/rds/hpc-work/opera_features'
+        save_dir = '/home/hy381/rds/hpc-work/audio_wav'
         for j, data in enumerate(dataset):
             audio, label, _ = data
             fname = os.path.basename(files[j])
@@ -78,8 +48,8 @@ def save_og_audio():
         # fname_array = np.array(fnames_list)
         print(label_array.shape)
         # np.save(f"{save_dir}/{dataset_type[i]}_audio_data.npy", audio_array)
-        np.save(f"{save_dir}/{dataset_type[i]}__labels.npy", label_array)
-        # np.save(f"{save_dir}/{dataset_type[i]}__files.npy", fname_array)
+        np.save(f"{save_dir}/{dataset_type[i]}_labels.npy", label_array)
+        # np.save(f"{save_dir}/{dataset_type[i]}_files.npy", fname_array)
 
 def save_denoised_audio(): 
     data_loader = ApneaDataLoader()
@@ -104,4 +74,33 @@ def save_denoised_audio():
             sf.write(audio_np)
         print(f"Audio saved for {output_path}")
 
-save_denoised_audio()
+
+def save_opera_features(): 
+    os.chdir('/home/hy381/rds/hpc-work/audio_wav')
+    data_loader = ApneaDataLoader()
+    train_files, valid_files, test_files = data_loader.split_train_valid_test()
+    train_files, valid_files, test_files = np.vectorize(os.path.basename)(train_files), np.vectorize(os.path.basename)(valid_files), np.vectorize(os.path.basename)(test_files)
+    train_files, valid_files, test_files = np.char.replace(train_files, '.tfrecord', '.wav'), np.char.replace(valid_files, '.tfrecord', '.wav'), np.char.replace(test_files, '.tfrecord', '.wav')
+    all_files = [train_files, valid_files, test_files]
+    data_type = ['train', 'valid', 'test']
+    for i in range(3): 
+        files = all_files[i]
+        print(f"Saving features for {data_type[i]:} {len(files)}")
+        feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
+        opera_features = extract_opera_feature(files,  pretrain="operaCT", input_sec=40, dim=768)
+        np.save(feature_dir + f"{data_type[i]}_operaCT_feature.npy", np.array(opera_features))
+#         from src.util import get_split_signal_librosa
+#         x_data = []
+#         for audio_file in files:
+#             print(audio_file)
+#             data = get_split_signal_librosa("", audio_file[:-4], spectrogram=True, input_sec=40)[0]
+#             # print(data.shape)
+#             x_data.append(data)
+#         x_data = np.array(x_data)
+#         np.save(feature_dir + f"{data_type[i]}_spectrogram.npy", x_data)
+# save_opera_features()
+# data_loader = ApneaDataLoader()
+# train_files, valid_files, test_files = data_loader.split_train_valid_test()
+
+# save_og_audio()
+save_opera_features()

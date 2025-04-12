@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Activation, GlobalAveragePooling2D, ReLU, Conv1D, MaxPool1D, InputLayer, Dropout, LSTM, Reshape, Conv2D, MaxPool2D, Flatten, Dense, BatchNormalization, AveragePooling2D, Bidirectional
+from tensorflow.keras.layers import GlobalAveragePooling1D, Permute, Lambda, TimeDistributed, Activation, GlobalAveragePooling2D, ReLU, Conv1D, MaxPool1D, InputLayer, Dropout, LSTM, Reshape, Conv2D, MaxPool2D, Flatten, Dense, BatchNormalization, AveragePooling2D, Bidirectional
 from tensorflow.keras.regularizers import l1, l2
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Sequential
@@ -11,24 +11,46 @@ import sys
 from data import ApneaDataLoader
 import train
 
-
+tf.keras.backend.clear_session()
 
 def mfcc_bilstm_model():
     model = tf.keras.models.Sequential()
     
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
     model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
-
+    
     model.add(Bidirectional(LSTM(512, return_sequences = True)))
-    model.add(Dropout(0.1))
+    model.add(Dropout(0.3))
     model.add(Bidirectional(LSTM(256, return_sequences = True)))
-    model.add(Dropout(0.1))
+    model.add(Dropout(0.3))
     model.add(Bidirectional(LSTM(128, return_sequences = True)))
-    model.add(Dropout(0.1))
+    model.add(Dropout(0.3))
     model.add(Bidirectional(LSTM(64)))
-    model.add(Dropout(0.1))
+    model.add(Dropout(0.3))
 
     model.add(Dense(64, activation='relu'))
+    model.add(Dense(3, activation='softmax'))
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    model.summary()
+    return model 
+
+def mfcc_bilstm_model_new():
+    model = tf.keras.models.Sequential()
+    
+    # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
+    model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
+    model.add(Permute((2,1)))
+    # model.add(Bidirectional(LSTM(1024, return_sequences = True, recurrent_dropout=0.3)))
+    # model.add(Dropout(0.4))
+
+    model.add(Bidirectional(LSTM(512, recurrent_dropout=0.3, return_sequences = True)))
+    model.add(Dropout(0.4))
+    model.add(Bidirectional(LSTM(512, recurrent_dropout=0.3)))
+    model.add(Dropout(0.4))
+
+    model.add(Dense(32, activation='relu', kernel_regularizer = l1(0.0001)))
+    model.add(Dropout(0.4))
     model.add(Dense(3, activation='softmax'))
     optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
@@ -39,10 +61,13 @@ def mfcc_lstm_model():
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
     model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
-
+    # transpose_layer = Lambda(lambda x: tf.transpose(x, perm=[0, 2, 1]))
+    # model.add(Lambda(lambda x: tf.transpose(x, perm=[0, 2, 1])))
     model.add(LSTM(512, return_sequences = True))
     model.add(Dropout(0.3))
-    model.add(LSTM(256))
+    model.add(LSTM(256, return_sequences = True))
+    model.add(Dropout(0.3))
+    model.add(LSTM(128))
     model.add(Dropout(0.3))
 
     model.add(Dense(64, activation='relu'))
@@ -56,6 +81,7 @@ def mfcc_cnn_model():
     model = tf.keras.models.Sequential()
     # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
     model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
+    
     model.add(Reshape((20, -1, 1)))
 
     model.add(Conv2D(64, (2, 5), activation = 'relu', padding = 'same'))
@@ -63,15 +89,15 @@ def mfcc_cnn_model():
     model.add(MaxPool2D((2, 4)))
     model.add(Dropout(0.3))
 
-    # model.add(Conv2D(64, (2, 7), activation = 'relu'))
-    # model.add(BatchNormalization())
-    # model.add(MaxPool2D((1, 3)))
-    # model.add(Dropout(0.3))
+    model.add(Conv2D(64, (2, 7), activation = 'relu'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((1, 3)))
+    model.add(Dropout(0.3))
 
-    # model.add(Conv2D(64, (3, 9), activation = 'relu'))
-    # model.add(BatchNormalization())
-    # model.add(MaxPool2D((2, 4)))
-    # model.add(Dropout(0.3))
+    model.add(Conv2D(64, (3, 9), activation = 'relu'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 4)))
+    model.add(Dropout(0.3))
 
     model.add(Conv2D(64, (3, 11), activation = 'relu', padding = 'same'))
     model.add(BatchNormalization())
@@ -86,7 +112,6 @@ def mfcc_cnn_model():
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
     model.summary()
     return model
-#
 
 def mel_spec_cnn(): 
     model = tf.keras.models.Sequential()
@@ -99,20 +124,20 @@ def mel_spec_cnn():
     model.add(MaxPool2D((2,4)))
     model.add(Dropout(0.3))
 
-    # model.add(Conv2D(32, (6,8), activation = 'relu', padding = 'same'))
-    # model.add(BatchNormalization())
-    # model.add(MaxPool2D((2,4)))
-    # model.add(Dropout(0.3))
+    model.add(Conv2D(32, (6,8), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
 
-    # model.add(Conv2D(32, (7,9), activation = 'relu', padding = 'same'))
-    # model.add(BatchNormalization())
-    # model.add(MaxPool2D((2,4)))
-    # model.add(Dropout(0.3))
+    model.add(Conv2D(32, (7,9), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
 
-    # model.add(Conv2D(32, (8,10), activation = 'relu', padding = 'same'))
-    # model.add(BatchNormalization())
-    # model.add(MaxPool2D(2,4))
-    # model.add(Dropout(0.3))
+    model.add(Conv2D(32, (8,10), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D(2,4))
+    model.add(Dropout(0.3))
 
     model.add(Conv2D(32, (9,11), activation = 'relu', padding = 'same'))
     model.add(BatchNormalization())
@@ -127,6 +152,133 @@ def mel_spec_cnn():
     optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4)
     model.summary()
     model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    return model
+
+
+def ms_cnn_lstm_model(): 
+    model = tf.keras.models.Sequential()
+    # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
+    model.add(InputLayer(input_shape = (128, 1251), dtype = 'float32'))
+    model.add(Reshape((128, -1, 1)))
+    num_filters = 64
+
+    model.add(Conv2D(num_filters, (4,8), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (5,9), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2,4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (7,10), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((3,5)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(num_filters, (9,11), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((3,5)))
+    model.add(Dropout(0.3))
+
+    model.add(Reshape((-1, 64)))
+    model.add(LSTM(512, return_sequences = True))
+    model.add(Dropout(0.3))
+    model.add(GlobalAveragePooling1D())
+
+    model.add(Dense(32, activation = 'relu', kernel_regularizer = l1(0.0001)))
+    model.add(Dropout(0.3))
+    model.add(Dense(3, activation = 'softmax'))
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    model.summary()
+    return model
+
+
+def mfcc_cnn_lstm_model(): 
+    model = tf.keras.models.Sequential()
+    # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
+    model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
+    model.add(Reshape((20, -1, 1)))
+
+    model.add(Conv2D(512, (2, 5), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((1, 4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(512, (2, 7), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((1, 4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(512, (3, 9), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 5)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(512, (3, 11), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 5)))
+    model.add(Dropout(0.3))
+
+    model.add(Reshape((15, 512)))
+
+    model.add(LSTM(512, return_sequences = True))
+    model.add(Dropout(0.3))
+    model.add(GlobalAveragePooling1D())
+
+    model.add(Dense(32, activation = 'relu', kernel_regularizer = l1(0.0001)))
+    model.add(Dropout(0.3))
+    model.add(Dense(3, activation = 'softmax'))
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    model.summary()
+    return model
+
+
+
+def mfcc_cnn_lstm_model(): 
+    model = tf.keras.models.Sequential()
+    # Input Layer - all inputs are dimensions (320,000, ) -> outputs (320,000, ) 
+    model.add(InputLayer(input_shape = (20, 1251), dtype = 'float32'))
+    model.add(Reshape((20, -1, 1)))
+
+    model.add(Conv2D(64, (2, 5), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((1, 4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(64, (2, 7), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((1, 4)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(64, (3, 9), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 5)))
+    model.add(Dropout(0.3))
+
+    model.add(Conv2D(64, (3, 11), activation = 'relu', padding = 'same'))
+    model.add(BatchNormalization())
+    model.add(MaxPool2D((2, 5)))
+    model.add(Dropout(0.3))
+
+    model.add(Reshape((15, 64)))
+
+    model.add(LSTM(64, return_sequences = True))
+    model.add(Dropout(0.3))
+    model.add(GlobalAveragePooling1D())
+
+    model.add(Dense(32, activation = 'relu', kernel_regularizer = l1(0.0001)))
+    model.add(Dropout(0.3))
+    model.add(Dense(3, activation = 'softmax'))
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-4, clipnorm = 1.0)
+    model.compile(optimizer = optimizer, loss = 'categorical_crossentropy', metrics = ['accuracy', 'precision', 'recall'])
+    model.summary()
     return model
 
 def opera_feature_dense(): 
@@ -149,13 +301,16 @@ def opera_feature_dense():
     return model
 
 data_loader = ApneaDataLoader(train_batch_size=64)
-# audio = data_loader.load_full_data(['audio'], parse_type = 'default')
+audio = data_loader.load_full_data(['audio_denoised'], parse_type = 'audio_feature')
 audio_ms = data_loader.load_full_data(['audio_mel_spec'], parse_type = 'audio_feature')
 audio_mfcc_denoised = data_loader.load_full_data(['audio_mfcc'], parse_type = 'audio_feature')
-# full_mel_spec_png_data =  data_loader.load_mel_spec_images()
-# opera_features = data_loader.load_opera_data/()
-# train.train_model_full_data(mel_spec_cnn, 'audio_ms_new', audio_ms, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)
-train.test_model(mfcc_cnn_model, audio_mfcc_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)
+
+# train.test_model(ms_cnn_lstm_model,  audio_ms, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)
+train.train_model_full_data(mfcc_cnn_lstm_model, 'audio_mfcc_cnn_lstm_1',  audio_mfcc_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)
+
+# train.test_model(mfcc_cnn_lstm_model, audio_mfcc_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH)
+# train.train_model_full_data(mfcc_lstm_model, 'audio_mfcc_lstm_new', audio_mfcc_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH)
+# train.train_model_full_data(mfcc_bilstm_model, 'audio_mfcc_bilstm_new', audio_mfcc_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)
 
 # train.train_model_full_data(mfcc_cnn_model_denoised_new, 'audio_mfcc_new_denoise', audio_mfcc_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)
 # train.train_model_full_data(mel_spec_cnn_denoised, 'audio_mel_spec_new_denoise', audio_denoised, data_loader.FULL_TRAIN_STEPS_PER_EPOCH, data_loader.FULL_VALID_STEPS_PER_EPOCH, epochs = 100)

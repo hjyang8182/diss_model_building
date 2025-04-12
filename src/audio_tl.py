@@ -33,32 +33,17 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # train_files, valid_files, test_files = np.vectorize(os.path.basename)(train_files), np.vectorize(os.path.basename)(valid_files), np.vectorize(os.path.basename)(test_files)
 # train_files, valid_files, test_files = np.char.replace(train_files, '.tfrecord', '.wav'), np.char.replace(valid_files, '.tfrecord', '.wav'), np.char.replace(test_files, '.tfrecord', '.wav')
 
-def save_opera_features(): 
-    os.chdir('/home/hy381/rds/hpc-work/audio_wav')
-    data_loader = ApneaDataLoader()
-    train_files, valid_files, test_files = data_loader.split_train_valid_test()
-    train_files, valid_files, test_files = np.vectorize(os.path.basename)(train_files), np.vectorize(os.path.basename)(valid_files), np.vectorize(os.path.basename)(test_files)
-    train_files, valid_files, test_files = np.char.replace(train_files, '.tfrecord', '.wav'), np.char.replace(valid_files, '.tfrecord', '.wav'), np.char.replace(test_files, '.tfrecord', '.wav')
-    all_files = [train_files, valid_files, test_files]
-    data_type = ['train', 'valid', 'test']
-    for i in range(3): 
-        files = all_files[i]
-        print(len(files))
-        feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
-        opera_features = extract_opera_feature(files,  pretrain="operaCT", input_sec=40, dim=768)
-        # np.save(feature_dir + f"{data_type[i]}_operaCT_feature.npy", np.array(opera_features))
-#         from src.util import get_split_signal_librosa
-#         x_data = []
-#         for audio_file in files:
-#             print(audio_file)
-#             data = get_split_signal_librosa("", audio_file[:-4], spectrogram=True, input_sec=40)[0]
-#             # print(data.shape)
-#             x_data.append(data)
-#         x_data = np.array(x_data)
-#         np.save(feature_dir + f"{data_type[i]}_spectrogram.npy", x_data)
-# save_opera_features()
-# data_loader = ApneaDataLoader()
-# train_files, valid_files, test_files = data_loader.split_train_valid_test()
+data_loader = ApneaDataLoader()
+train_files, valid_files, test_files = data_loader.split_train_valid_test()
+print(len(train_files))
+wav_files = glob.glob('/home/hy381/rds/hpc-work/audio_wav/*.wav')
+print(len(wav_files))
+# def find_csv_fname(fname): 
+#     base = os.path.basename(fname)
+#     subject = base.split('_')[0]
+#     base = base.replace('.wav', '.tfrecord')
+#     return f"{subject}/{base}"
+# csv_fnames = [find_csv_fname[f] for f in wav_files]
 
 class CNNClassifier(nn.Module):
     def __init__(self, input_dim=768, output_dim=3):
@@ -155,27 +140,9 @@ def main():
     ckpt = torch.load(encoder_path, map_location=device)
     pretrained_model.load_state_dict(ckpt["state_dict"], strict=False)
 
-
     net = pretrained_model.encoder
-    
-    # add fully connected layers
-
-    class CustomHead(nn.Module):
-        def __init__(self, input_dim, num_classes):
-            super(CustomHead, self).__init__()
-            self.fc_layers = nn.Sequential(
-                nn.Linear(input_dim, 512),
-                nn.ReLU(),
-                nn.Linear(512, 256),
-                nn.ReLU(),
-                nn.Linear(256, num_classes)  # Final layer for classification
-            )
-
-        def forward(self, x):
-            return self.fc_layers(x)
-
-    model = AudioClassifier(net=net, head='mlp', classes=3, freeze_encoder="none")
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    model = AudioClassifier(net=net, head='mlp', feat_dim = 768, classes=3, lr=1e-3, freeze_encoder="none")
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
 
@@ -194,9 +161,9 @@ def main():
     valid_data = AudioDataset(valid_features, valid_labels)
     test_data = AudioDataset(test_features, test_labels)
 
-    train_loader = DataLoader(train_data, batch_size = 128,shuffle = True)
-    valid_loader = DataLoader(valid_data, batch_size = 128, shuffle = False)
-    test_loader = DataLoader(test_data, batch_size = 128, shuffle = False)
+    train_loader = DataLoader(train_data, batch_size = 64,shuffle = True)
+    valid_loader = DataLoader(valid_data, batch_size = 64, shuffle = False)
+    test_loader = DataLoader(test_data, batch_size = 64, shuffle = False)
 
     num_epochs = 200
     num_training_steps = num_epochs * len(train_loader)
@@ -211,13 +178,14 @@ def main():
         for inputs, labels in train_loader:
             inputs = inputs.to(device).float()
             labels = labels.to(device)
+            optimizer.zero_grad()
+            
             outputs = model(inputs)
             loss = criterion(outputs, labels) # Calculate loss
             total_loss += loss.item()
 
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
 
             preds = torch.argmax(outputs, dim=1)  # Predicted class
             correct_train += (preds == labels).sum().item()
@@ -227,7 +195,7 @@ def main():
 
         train_acc = correct_train / total_train
         avg_train_loss = total_loss / len(train_loader)
-
+    
         # Validation Phase
         model.eval()  # Set model to evaluation mode
         correct_val, total_val = 0, 0

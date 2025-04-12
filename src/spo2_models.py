@@ -91,7 +91,7 @@ def lstm_model():
     model.add(LSTM(256, return_sequences = True))
     model.add(LSTM(128))
 
-    # model.add(GlobalAveragePooling1D())
+    model.add(GlobalAveragePooling1D())
     model.add(Dense(64, activation='relu'))
     model.add(Dense(3, activation='softmax'))
 

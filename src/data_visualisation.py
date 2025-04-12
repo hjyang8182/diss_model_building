@@ -157,22 +157,17 @@ def visualize_spo2_subject(subject):
     plt.show()
     plt.close()
 
-# def visualize_opera_spectrogram(): 
-#     wav2vec_feature_dir = '/home/hy381/rds/hpc-work/opera_features/'
-
-#     train_features = np.load(wav2vec_feature_dir + 'train_spectrogram.npy')
-#     for feature in train_features: 
-#         mel_spec_display = librosa.display.specshow(feature, sr=8000, x_axis="time", y_axis="linear", ax = ax[i],  hop_length=long_hop_length)
+def visualize_model_arch(model_name): 
+    models_dir = '/home/hy381/rds/hpc-work/models'
+    model_fpath = os.path.join(models_dir, model_name, f'{model_name}.keras')
+    model = load_model(model_fpath)
+    visualkeras.layered_view(model, to_file=f'/home/hy381/model_training/img/models/{model_name}.png', legend = True, padding = 10, max_xy = 400)
 
 def main(): 
     models_dir = '/home/hy381/rds/hpc-work/models'
-    all_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model', 'audio_ms_cnn', 'audio_mfcc_lstm', 'audio_mfcc_cnn', 'audio_ms_new']
-    for model_name in all_models: 
-        model_fpath = os.path.join(models_dir, model_name, f'{model_name}.keras')
-        print(model_fpath)
-        model = load_model(model_fpath)
-        visualkeras.layered_view(model, to_file=f'/home/hy381/model_training/img/models/{model_name}.png', legend = True, padding = 10, max_xy = 800)
-
+    # all_models = ['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model', 'audio_ms_cnn', 'audio_mfcc_cnn_lstm', 'audio_mfcc_lstm', 'audio_mfcc_cnn', 'audio_ms_new']
+    # for model_name in all_models: 
+    visualize_model_arch('if_spo2_cnn_mfcc_cnn_lstm')
 
     # non_apnea_files = data_labels[data_labels['label'] == 0]['file'].values.astype(str)
     # hypopnea_files = data_labels[data_labels['label'] == 1]['file'].values.astype(str)

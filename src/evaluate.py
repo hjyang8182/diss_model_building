@@ -6,10 +6,23 @@ import json
 import seaborn as sns
 from data import ApneaDataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
 from tensorflow.keras.models import load_model
 import glob
 import json
+from scipy.stats import ttest_ind
+
+def load_predictions(model_name): 
+    predictions_output_file = f'/home/hy381/rds/hpc-work/models/{model_name}/predictions.txt'
+    preds = np.loadtxt(predictions_output_file) 
+    pred_labels = np.argmax(preds, axis = 1)
+    return pred_labels
+
+def load_gts(): 
+    gt_fname = '/home/hy381/rds/hpc-work/models/ground_truth.txt'
+    gt = np.loadtxt(gt_fname)
+    gt_labels = np.argmax(gt, axis = 1)
+    return gt_labels
 
 class Evaluator():
     def __init__(self): 
@@ -60,11 +73,9 @@ class Evaluator():
             self.write_test_predictions_truths(model_name, test_data)
 
         preds = np.loadtxt(predictions_output_file)
-        gt = np.loadtxt(ground_truth_output_file)
         
         pred_labels = np.argmax(preds, axis = 1)
-        gt_labels = np.argmax(gt, axis = 1)
-        cm = confusion_matrix(gt_labels, pred_labels)
+        cm = confusion_matrix(self.gt_labels, pred_labels)
 
         labels = ['Normal', 'Hypopnea', 'Apnea']
         plt.figure(figsize=(8,8))
@@ -88,12 +99,8 @@ class Evaluator():
         preds = np.loadtxt(predictions_output_file)
         pred_labels = np.argmax(preds, axis = 1)
 
-        ground_truth_output_file =  os.path.join(model_dir, 'ground_truth.txt')
-        gt = np.loadtxt(ground_truth_output_file)
-        gt_labels = np.argmax(gt, axis = 1)
-        
-        report = classification_report(gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'])
-        report_file = f'/home/hy381/model_training/model_results/reports/{model_name}.txt'
+        report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'], digits = 4)
+        report_file = f'/home/hy381/model_training/model_results/individual_models/reports/{model_name}.txt'
         with open(report_file, 'w') as f: 
             f.write(report)
         return report
@@ -110,14 +117,10 @@ class Evaluator():
         preds = np.loadtxt(predictions_output_file)
         pred_labels = np.argmax(preds, axis = 1)
 
-        ground_truth_output_file =  os.path.join(model_dir, 'ground_truth.txt')
-        gt = np.loadtxt(ground_truth_output_file)
-        gt_labels = np.argmax(gt, axis = 1)
-        
         pred_labels_binary = np.where(pred_labels == 0, 0, 1)
         gt_labels_binary = np.where(self.gt_labels == 0, 0, 1)           
 
-        report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'])
+        report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'], digits = 4)
         report_file = f'/home/hy381/model_training/model_results/individual_models/binary_reports/{model_name}.txt'
         with open(report_file, 'w') as f: 
             f.write(report)
@@ -165,21 +168,36 @@ class Evaluator():
         plt.savefig(f'/home/hy381/model_training/img/history/{model_name}_history.png')    
 
     
-    def find_best_fused_model(self, models, metric): 
+    def find_best_model(self, models, metric): 
         eval_metrics = []
         for model in models: 
             preds = np.loadtxt(f'/home/hy381/rds/hpc-work/models/{model}/predictions.txt')
             pred_labels = np.argmax(preds, axis = 1)
-            report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypoponea', 'Apnea'], output_dict=True)
+            report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypoponea', 'Apnea'], output_dict=True, digits = 4)
             if metric != 'accuracy': 
-                eval_metrics.append(report['weighted avg'][metric])
+                eval_metrics.append(report['macro avg'][metric])
             else: 
                 eval_metrics.append(report[metric])
         best_indexes = np.argsort(eval_metrics)[::-1]
-        print(eval_metrics)
-        print(best_indexes)
         models_np = np.array(models)
         return models_np[best_indexes]
+    
+    def find_best_fused_model(self, metric): 
+        spo2_models =['spo2_cnn_1d_model', 'spo2_dense_model', 'spo2_gru_model', 'spo2_bilstm_model', 'spo2_lstm_model']
+        audio_models = ['audio_mfcc_lstm', 'audio_mfcc_cnn', 'audio_ms_cnn', 'audio_mfcc_bilstm', 'audio_mfcc_cnn_lstm']
+        methods = ['avg', 'weighted', 'prod']
+        
+        fused_models = []
+        for method in methods: 
+            for spo2_model in spo2_models: 
+                for audio_model in audio_models: 
+                    spo2_model_type = spo2_model.split('_')[1]
+                    audio_model_type = audio_model.removeprefix('audio_')
+                    fused_model_name = f'lf_{method}_{spo2_model_type}+{audio_model_type}'
+                    fused_models.append(fused_model_name)
+
+        best_model = self.find_best_model(fused_models, metric)
+        return best_model
 
     def save_cm_png(self, cm, cm_file): 
         labels = ['Normal', 'Hypopnea', 'Apnea']
@@ -196,29 +214,69 @@ class Evaluator():
             f.write(report)
     
     def return_classification_report(self, pred_labels): 
-        report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'])
+        report = classification_report(self.gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'], digits = 4)
         return report
 
     def return_biclass_report(self, pred_labels): 
         pred_labels_binary = np.where(pred_labels == 0, 0, 1)
         gt_labels_binary = np.where(self.gt_labels == 0, 0, 1)          
-        report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'])
+        report = classification_report(gt_labels_binary, pred_labels_binary, labels = [0,1], target_names = ['Normal', 'Abnormal'], digits = 4)
         return report
 
     def write_train_cm(self, model_name, train_data, steps): 
         model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
         model_fname = os.path.join(model_dir, f'{model_name}.keras')
         model = load_model(model_fname)
-
+        
         predictions = model.predict(train_data, steps = steps)
         pred_labels = np.argmax(predictions, axis = 1)
 
-        feature_dir = '/home/hy381/rds/hpc-work/opera_features'
-        gt_labels = np.load(f"{feature_dir}/train_labels.npy")
-        report = classification_report(gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'], output_dict=True)
+        predictions_output_file = f'/home/hy381/model_training/model_results/individual_models/{model_name}.txt'
+        preds = np.loadtxt(predictions_output_file)
+        pred_labels = np.argmax(preds, axis = 1)
+
+        gt_labels = np.load(f"/home/hy381/model_training/model_results/individual_models/train_labels.npy")
+        print(len(gt_labels))
+        report = classification_report(gt_labels, pred_labels, labels = [0,1,2], target_names = ['Normal', 'Hypopnea', 'Apnea'], output_dict=True, digits = 4)
         with open(f'/home/hy381/model_training/model_results/individual_models/cm_json/{model_name}.json', 'w') as json_file:
             json.dump(report, json_file)
+    
+    def bootstrap_performance(self, model_name, n_bootstraps = 1000,): 
+        pred_labels = load_predictions(model_name)
+        bootstrap_accs = []
+        bootstrap_f1s = []
+        rng = np.random.default_rng(seed = 42)
 
+        for i in range(n_bootstraps): 
+            indices = rng.choice(len(self.gt_labels), len(self.gt_labels), replace = True)
+            acc = accuracy_score(self.gt_labels[indices], pred_labels[indices])
+            f1 = f1_score(self.gt_labels[indices], pred_labels[indices], average = 'macro')
+            bootstrap_accs.append(acc)
+            bootstrap_f1s.append(f1)
+        bootstrap_accs = np.array(bootstrap_accs)
+        bootstrap_f1s = np.array(bootstrap_f1s)
+
+        np.save(f'/home/hy381/rds/hpc-work/models/{model_name}/bootstrap_accs.npy', bootstrap_accs)
+        np.save(f'/home/hy381/rds/hpc-work/models/{model_name}/bootstrap_f1s.npy', bootstrap_f1s)
+        return bootstrap_accs, bootstrap_f1s
+
+    def find_perf_significance(self, model1, model2): 
+        bootstrap_acc1 = np.load(f'/home/hy381/rds/hpc-work/models/{model1}/bootstrap_accs.npy')
+        bootstrap_acc2 = np.load(f'/home/hy381/rds/hpc-work/models/{model2}/bootstrap_accs.npy')
+        print(np.mean(bootstrap_acc1))
+        print(np.std(bootstrap_acc1))
+
+        _, p_val_acc = ttest_ind(bootstrap_acc1, bootstrap_acc2)
+
+        bootstrap_f1_1 = np.load(f'/home/hy381/rds/hpc-work/models/{model1}/bootstrap_f1s.npy')
+        bootstrap_f1_2 = np.load(f'/home/hy381/rds/hpc-work/models/{model2}/bootstrap_f1s.npy')
+        print(np.mean(bootstrap_f1_1))
+        print(np.std(bootstrap_f1_1))
+        _, p_val_f1 = ttest_ind(bootstrap_f1_1, bootstrap_f1_2)
+
+
+        return p_val_acc, p_val_f1 
+    
 def find_error_files(model_name):
     model_dir = f'/home/hy381/rds/hpc-work/models/{model_name}'
     predictions_output_file = os.path.join(model_dir, 'predictions.txt')
@@ -233,26 +291,37 @@ def find_error_files(model_name):
     
 def main(): 
     data_loader = ApneaDataLoader()
-    train_data, _, test_data = data_loader.load_full_data(['spo2'], parse_type = 'default', apply_delta=True)
-
-    # train_data, _, test_data = data_loader.load_full_data(['audio_mel_spec'], parse_type = 'audio_feature')
     evaluator = Evaluator()
-    evaluator.write_train_cm('spo2_cnn_1d_model', train_data, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    _, _, test_data = data_loader.load_full_data(['spo2'], parse_type = 'default', apply_delta = True, window_spo2= True)
+
+    evaluator.write_model_binary_report('if_spo2_ms')
+    evaluator.write_model_classification_report('if_spo2_ms')
+    evaluator.save_confusion_matrix('if_spo2_ms')
+   
+    # base_dir_default = '/home/hy381/rds/hpc-work/segmented_data_new/'
+    # base_dir_audio = '/home/hy381/rds/hpc-work/audio_feature_data/'
+    # train_files = data_loader.split_train_valid_test[0]
+    # default_train_files = np.char.add(base_dir_default, train_files)
+    # audio_train_files = np.char.add(base_dir_audio, train_files)
+
+    # spo2_train_data = data_loader.load_tfrecord_dataset(default_train_files, ['spo2'], parse_type = 'default', dataset_type= 'train', apply_delta = True)
+    # spo2_windowed_data = data_loader.load_tfrecord_dataset(default_train_files, ['spo2'], parse_type = 'default', dataset_type= 'train', apply_delta = True, window_spo2=True)
+    # audio_mfcc = data_loader.load_tfrecord_dataset(audio_train_files, ['audio_mfcc'], parse_type = 'audio_feature', dataset_type= 'train', apply_delta = True, window_spo2=True)
+    # audio_mel_spec = data_loader.load_tfrecord_dataset(audio_train_files, ['audio_mel_spec'], parse_type = 'audio_feature', dataset_type= 'train', apply_delta = True, window_spo2=True)
+
+    # evaluator.write_train_cm('spo2_cnn_1d_model', spo2_train_data, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('spo2_lstm_model', spo2_windowed_data, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('spo2_bilstm_model', spo2_windowed_data, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('spo2_gru_model', spo2_windowed_data, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('spo2_dense_model', spo2_train_data, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+
+    # audio_mel_spec, _, test_data = data_loader.load_full_data(['audio_mel_spec'], parse_type = 'audio_feature')
+    # audio_mfcc, _, test_data = data_loader.load_full_data(['audio_mfcc'], parse_type = 'audio_feature')
+    # evaluator.write_train_cm('audio_ms_new', audio_mel_spec, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('audio_mfcc_cnn', audio_mfcc, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('audio_mfcc_lstm', audio_mfcc, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+    # evaluator.write_train_cm('audio_mfcc_lstm', audio_mfcc, data_loader.FULL_TRAIN_STEPS_PER_EPOCH)
+
     
 if __name__ == '__main__':
     main()
-# evaluator = Evaluator()
-# data_loader = ApneaDataLoader()
-# _, _, test_data = data_loader.load_full_data(['audio_mel_spec'], parse_type = 'audio_feature')
-# # evaluator.write_predictions_truths('audio_ms_new', test_data)
-# evaluator.write_model_binary_report('audio_ms_new')
-# evaluator.write_model_classification_report('audio_ms_new')
-# evaluator.save_confusion_matrix('audio_ms_new')
-
-# fused_models = glob.glob('/home/hy381/rds/hpc-work/models/lf_*')
-# fused_model_names = [os.path.basename(f) for f in fused_models]
-# best_accs = evaluator.find_best_fused_model(fused_model_names, 'accuracy')
-# best_f1s = evaluator.find_best_fused_model(fused_model_names, 'f1-score')
-
-# print(best_accs)
-# print(best_f1s)

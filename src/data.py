@@ -88,8 +88,8 @@ class ApneaDataLoader():
         self.TRAIN_STEPS_PER_EPOCH = self.subset_train_count//self.train_batch_size
         self.VALID_STEPS_PER_EPOCH = self.subset_valid_count//self.train_batch_size -1
 
-    def load_full_data(self, features, apply_delta = False, window_spo2 = False, parse_type = 'default', batch = True): 
-        full_data = self.prepare_data(features = features, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type, batch = batch)
+    def load_full_data(self, features, apply_delta = False, window_spo2 = False, parse_type = 'default', batch = True, shuffle = True): 
+        full_data = self.prepare_data(features = features, apply_delta = apply_delta, window_spo2=window_spo2, parse_type = parse_type, batch = batch, shuffle = shuffle)
         return full_data
 
     def load_subset_data(self, features, window_spo2 = False, parse_type = 'default'): 
@@ -140,11 +140,11 @@ class ApneaDataLoader():
                     else: 
                         parsed_features['spo2'].set_shape([40])
 
-            if 'audio' in features: 
-                audio = parsed_features['audio']
-                audio_feature = mel_spec(audio)
-                parsed_features['audio'] = tf.convert_to_tensor(audio_feature, dtype = tf.float32) 
-                parsed_features['audio'].set_shape([128, 321])
+            # if 'audio' in features: 
+            #     audio = parsed_features['audio']
+            #     audio_feature = mel_spec(audio)
+            #     parsed_features['audio'] = tf.convert_to_tensor(audio_feature, dtype = tf.float32) 
+            #     parsed_features['audio'].set_shape([128, 321])
             # concat_features = tf.concat([audio_feature_pca, parsed_features['spo2']], axis = 0)
             # parsed_features['concat_features'] = concat_features
             # parsed_features['concat_features'].set_shape([140])
@@ -181,7 +181,12 @@ class ApneaDataLoader():
 
             parsed_features['audio_mel_spec'] = tf.reshape(parsed_features['audio_mel_spec'], (128, 1251))
             parsed_features['audio_mfcc'] = tf.reshape(parsed_features['audio_mfcc'], (20, 1251))
-
+            
+            # @tf.function
+            # def transpose(x): 
+            #     return tf.transpose(x, perm = [1,0])
+            # parsed_features['audio_mfcc'] = transpose(parsed_features['audio_mfcc'])
+            # parsed_features['audio_mfcc'].set_shape([1251, 20])
             return_vals = [parsed_features[feature] for feature in features]
             return_vals.append(one_hot_label)
             return_vals.append(weight)
@@ -324,22 +329,28 @@ class ApneaDataLoader():
 
         return train_files_subset, valid_files_subset, test_files_subset
 
-    def load_tfrecord_dataset(self, file_list, features, parse_type, dataset_type, apply_delta = False, window_spo2 = False):
+    def load_tfrecord_dataset(self, file_list, features, parse_type, dataset_type, apply_delta = False, window_spo2 = False, shuffle = True):
         dataset = tf.data.Dataset.from_tensor_slices(file_list)
 
-        # Interleave multiple TFRecord files in parallel
-        dataset = dataset.interleave(
-            lambda filename: tf.data.TFRecordDataset(filename, buffer_size=1000000).shuffle(10000),
-            cycle_length=4,  # Number of files read in parallel
-            num_parallel_calls=AUTOTUNE  # Optimize for performance
-        )
+        if shuffle:
+            dataset = dataset.interleave(
+                lambda filename: tf.data.TFRecordDataset(filename, buffer_size=1000000).shuffle(10000),
+                cycle_length=4, 
+                num_parallel_calls=AUTOTUNE 
+            )
+        else: 
+            dataset = dataset.interleave(
+                lambda filename: tf.data.TFRecordDataset(filename, buffer_size=1000000),
+                cycle_length=4, 
+                num_parallel_calls=AUTOTUNE 
+            )
         if parse_type == 'default': 
             dataset = self.parse_raw_tf_record_dataset(dataset, features, dataset_type=dataset_type, apply_delta = apply_delta,  window_spo2=window_spo2)
         else: 
             dataset = self.parse_audio_feature_tf_record_dataset(dataset, features, dataset_type=dataset_type)
         return dataset
 
-    def prepare_data(self, features, subset = False, apply_delta = False, window_spo2 = False, parse_type = 'default', batch = True):
+    def prepare_data(self, features, subset = False, apply_delta = False, window_spo2 = False, parse_type = 'default', batch = True, shuffle = True):
         """
         Loads and batches the training, validation, test data and returns the result.
 
@@ -367,9 +378,9 @@ class ApneaDataLoader():
             valid_files = np.char.add(base_dir, valid_files)
             test_files = np.char.add(base_dir, test_files)
 
-            train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', apply_delta = apply_delta, window_spo2 = window_spo2)
-            valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', apply_delta = apply_delta, window_spo2 = window_spo2)
-            test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', apply_delta = apply_delta, window_spo2 = window_spo2)
+            train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', apply_delta = apply_delta, window_spo2 = window_spo2, shuffle = shuffle)
+            valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', apply_delta = apply_delta, window_spo2 = window_spo2, shuffle = shuffle)
+            test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', apply_delta = apply_delta, window_spo2 = window_spo2, shuffle = shuffle)
 
             # if feature == 'audio':
             #     # (1999, 768)
@@ -381,9 +392,9 @@ class ApneaDataLoader():
             valid_files = np.char.add(base_dir, valid_files)
             test_files = np.char.add(base_dir, test_files)
 
-            train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', window_spo2 = window_spo2)
-            valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', window_spo2 = window_spo2)
-            test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', window_spo2 = window_spo2)
+            train_dataset = self.load_tfrecord_dataset(train_files, features, parse_type, 'train', window_spo2 = window_spo2, shuffle = shuffle)
+            valid_dataset = self.load_tfrecord_dataset(valid_files, features, parse_type, 'valid', window_spo2 = window_spo2, shuffle = shuffle)
+            test_dataset  = self.load_tfrecord_dataset(test_files, features, parse_type, 'test', window_spo2 = window_spo2, shuffle = shuffle)
         
         if batch: 
             train_data_batched = train_dataset.batch(self.train_batch_size).repeat().prefetch(AUTOTUNE)
@@ -506,4 +517,4 @@ class ApneaDataLoader():
         sample_weights = tf.convert_to_tensor(sample_weights, tf.float32)
         sample_weights.set_shape([2])
         return sample_weights
-
+    
